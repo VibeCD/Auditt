@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { cn, formatFileSize, getFileType } from "@/lib/utils";
 import { MAX_UPLOAD_SIZE_BYTES } from "@/lib/constants";
@@ -24,8 +24,11 @@ export function FileUpload({
   onFilesAdded,
   onFileRemoved,
 }: FileUploadProps) {
+  const [uploadErrors, setUploadErrors] = useState<string[]>([]);
+
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
+      setUploadErrors([]);
       const newFiles: UploadedFile[] = [];
       for (const file of acceptedFiles) {
         const fileType = getFileType(file.name);
@@ -65,6 +68,21 @@ export function FileUpload({
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected: (rejections) => {
+      const errors = rejections.map((r) => {
+        const reason = r.errors[0]?.code;
+        if (reason === "file-too-large") {
+          return `${r.file.name}: File is too large. Use files up to ${formatFileSize(
+            MAX_UPLOAD_SIZE_BYTES
+          )}.`;
+        }
+        if (reason === "file-invalid-type") {
+          return `${r.file.name}: Unsupported file type. Use PDF, DOCX, TXT, JPG, or PNG.`;
+        }
+        return `${r.file.name}: Upload failed (${reason || r.errors[0]?.message || "unknown error"}). Try a different file or smaller size.`;
+      });
+      setUploadErrors(errors);
+    },
     accept: {
       "application/pdf": [".pdf"],
       "image/*": [".jpg", ".jpeg", ".png", ".gif", ".webp"],
@@ -102,6 +120,14 @@ export function FileUpload({
           </>
         )}
       </div>
+
+      {uploadErrors.length > 0 && (
+        <div className="todo-highlight border rounded-lg px-3 py-2 text-xs space-y-1">
+          {uploadErrors.map((error) => (
+            <p key={error}>⚠️ {error}</p>
+          ))}
+        </div>
+      )}
 
       {files.length > 0 && (
         <div className="space-y-2">

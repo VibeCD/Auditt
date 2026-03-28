@@ -48,12 +48,12 @@ export function ResultsViewer({
   const draftCount = pack.sections.filter((s) => s.isDraft).length;
 
   return (
-    <div className="flex h-full min-h-[600px] bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
+    <div className="flex h-full min-h-[600px] app-surface rounded-2xl shadow-xl app-border overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-64 flex-shrink-0 bg-gray-50 border-r border-gray-200 flex flex-col">
-        <div className="p-4 border-b border-gray-200">
-          <h2 className="font-bold text-gray-900 text-sm truncate">{pack.businessName}</h2>
-          <p className="text-xs text-gray-500 mt-0.5">
+      <aside className="w-64 flex-shrink-0 app-surface-2 border-r app-border flex flex-col">
+        <div className="p-4 border-b app-border">
+          <h2 className="font-bold app-text text-sm truncate">{pack.businessName}</h2>
+          <p className="text-xs app-muted mt-0.5">
             {pack.version} · {pack.sections.length} documents
           </p>
           {draftCount > 0 && (
@@ -71,7 +71,7 @@ export function ResultsViewer({
                 "w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all",
                 activeSection === s.id
                   ? `${colors.bg} ${colors.text} font-semibold`
-                  : "text-gray-600 hover:bg-gray-100"
+                  : "app-muted hover:app-text hover:bg-black/5 dark:hover:bg-white/5"
               )}
             >
               <div className="flex items-start gap-2">
@@ -88,11 +88,11 @@ export function ResultsViewer({
             </button>
           ))}
         </nav>
-        <div className="p-3 border-t border-gray-200 space-y-2">
+        <div className="p-3 border-t app-border space-y-2">
           <button
             onClick={onExportPdf}
             disabled={isExporting}
-            className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-60 transition-colors shadow"
+            className="w-full py-2.5 btn-primary rounded-lg text-sm font-bold disabled:opacity-60 transition-colors shadow app-focus"
           >
             {isExporting ? "Preparing..." : "⬇ Download Binder PDF"}
           </button>
@@ -104,18 +104,18 @@ export function ResultsViewer({
         {currentSection ? (
           <>
             {/* Section header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
+            <div className="flex items-center justify-between px-6 py-4 border-b app-border app-surface">
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xl">{TYPE_ICONS[currentSection.type]}</span>
-                  <h3 className="font-bold text-gray-900">{currentSection.title}</h3>
+                  <h3 className="font-bold app-text">{currentSection.title}</h3>
                   {currentSection.isDraft && (
                     <span className="bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-0.5 rounded-full">
                       Draft — Needs Review
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-gray-400 mt-0.5 ml-7 capitalize">
+                <p className="text-xs app-muted mt-0.5 ml-7 capitalize">
                   {currentSection.type}
                 </p>
               </div>
@@ -125,7 +125,7 @@ export function ResultsViewer({
                   <button
                     key={action.id}
                     onClick={() => onRegenerate(currentSection.id, action.id)}
-                    className="flex items-center gap-1 px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded-lg transition-colors"
+                     className="flex items-center gap-1 px-2.5 py-1.5 app-surface-2 hover:bg-black/5 dark:hover:bg-white/5 app-text text-xs font-medium rounded-lg transition-colors"
                     title={action.label}
                   >
                     <span>{action.icon}</span>
@@ -138,13 +138,13 @@ export function ResultsViewer({
             {/* Document content */}
             <div className="flex-1 overflow-y-auto p-6">
               {currentSection.missingItems.length > 0 && (
-                <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <p className="text-xs font-semibold text-amber-700 mb-1">
+                <div className="mb-4 todo-highlight border rounded-lg p-3">
+                  <p className="text-xs font-semibold mb-1">
                     Items needing review:
                   </p>
                   <ul className="list-disc list-inside space-y-0.5">
                     {currentSection.missingItems.slice(0, 5).map((item, i) => (
-                      <li key={i} className="text-xs text-amber-600">
+                      <li key={i} className="text-xs">
                         {item}
                       </li>
                     ))}
@@ -158,9 +158,9 @@ export function ResultsViewer({
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-gray-400">
-            Select a section from the sidebar
-          </div>
+            <div className="flex-1 flex items-center justify-center app-muted">
+              Select a section from the sidebar
+            </div>
         )}
       </main>
     </div>

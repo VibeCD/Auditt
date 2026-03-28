@@ -156,13 +156,13 @@ function ReviewPageContent() {
         </div>
 
         {error && (
-          <div className="mb-4 bg-red-900/30 border border-red-500/30 rounded-lg px-4 py-3 text-red-300 text-sm">
+          <div className="mb-4 todo-highlight border rounded-lg px-4 py-3 text-sm">
             {error}
           </div>
         )}
 
         {pack.warnings && pack.warnings.length > 0 && (
-          <div className="mb-4 bg-amber-900/30 border border-amber-500/30 rounded-lg px-4 py-3 text-amber-200 text-xs">
+          <div className="mb-4 todo-highlight border rounded-lg px-4 py-3 text-xs">
             <p className="font-semibold text-amber-300 mb-1">Generation warnings</p>
             <ul className="list-disc list-inside space-y-0.5">
               {pack.warnings.slice(0, 5).map((warning) => (
@@ -173,7 +173,7 @@ function ReviewPageContent() {
         )}
 
         {/* Disclaimer banner */}
-        <div className="mb-4 bg-blue-900/30 border border-blue-500/20 rounded-lg px-4 py-3 text-xs text-blue-300">
+        <div className="mb-4 app-surface app-border rounded-lg px-4 py-3 text-xs app-muted">
           <strong>Review recommended:</strong> This documentation was AI-generated. Always verify with your local regulations before use. Items marked &ldquo;Draft&rdquo; require manual review.
         </div>
 
