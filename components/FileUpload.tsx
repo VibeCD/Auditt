@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import { cn, formatFileSize, getFileType } from "@/lib/utils";
+import { MAX_UPLOAD_SIZE_BYTES } from "@/lib/constants";
 import { UploadedFile } from "@/types";
 
 interface FileUploadProps {
@@ -72,7 +73,7 @@ export function FileUpload({
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         [".docx"],
     },
-    maxSize: 10 * 1024 * 1024, // 10 MB
+    maxSize: MAX_UPLOAD_SIZE_BYTES,
   });
 
   return (

@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { DocumentSection, GapQuestion, GeneratedPack, Niche, UploadedFile } from "@/types";
 import { generateVersion, formatDate } from "@/lib/utils";
+import { MAX_GAP_QUESTIONS } from "@/lib/constants";
 
 // SECURITY: API key is ONLY used server-side via environment variable. Never exposed to client.
 function getNimClient(): OpenAI {
@@ -14,14 +15,15 @@ function getNimClient(): OpenAI {
   });
 }
 
-const MODEL = "moonshotai/kimi-k2-thinking";
+const NIM_MODEL = "moonshotai/kimi-k2-thinking";
+const MAX_INPUT_CHARS = 6000;
 
 async function callNim(prompt: string, systemPrompt: string): Promise<string> {
   const client = getNimClient();
   let result = "";
 
   const stream = await client.chat.completions.create({
-    model: MODEL,
+    model: NIM_MODEL,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: prompt },
@@ -74,7 +76,7 @@ Return ONLY valid JSON with no markdown formatting. Extract arrays of facts for 
   const prompt = `Business type: ${niche}
 
 Raw content from uploaded documents:
-${rawContent.substring(0, 6000)}
+${rawContent.substring(0, MAX_INPUT_CHARS)}
 
 Extract all facts into this JSON structure:
 {
@@ -176,7 +178,7 @@ Only ask about truly MISSING items not found in the extracted facts. Max 7 quest
 
   const response = await callNim(prompt, systemPrompt);
   const questions = safeParseJson<GapQuestion[]>(response, []);
-  return questions.slice(0, 7);
+  return questions.slice(0, MAX_GAP_QUESTIONS);
 }
 
 // Step 3: Generate individual document content

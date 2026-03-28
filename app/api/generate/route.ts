@@ -1,20 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildPack } from "@/lib/ai-pipeline";
 import { GeneratePackRequest } from "@/types";
+import { RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "@/lib/constants";
 
-// Rate limiting: simple in-memory store (production should use Redis)
+// Rate limiting: simple in-memory store (production should use a shared store like Redis/Vercel KV)
 const requestCounts = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT = 10;
-const RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
   const record = requestCounts.get(ip);
   if (!record || now > record.resetAt) {
-    requestCounts.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    requestCounts.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
     return true;
   }
-  if (record.count >= RATE_LIMIT) return false;
+  if (record.count >= RATE_LIMIT_MAX) return false;
   record.count++;
   return true;
 }

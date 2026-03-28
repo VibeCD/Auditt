@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { DocumentSection, GeneratedPack, Niche } from "@/types";
+import { GeneratedPack, Niche } from "@/types";
 import { cn } from "@/lib/utils";
 
 interface ResultsViewerProps {

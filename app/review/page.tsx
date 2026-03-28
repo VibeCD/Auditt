@@ -87,9 +87,10 @@ function ReviewPageContent() {
             ? {
                 ...s,
                 content:
-                  `<div class="regenerating-notice" style="background:#dbeafe;border:1px solid #93c5fd;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#1e40af;">
-                    ℹ️ <strong>Improvement requested:</strong> "${actionText}" — Regeneration with AI requires the Generate Pack flow to be re-run with this preference noted.
-                  </div>` + s.content,
+                  `<div class="regen-notice">` +
+                  `ℹ️ <strong>Improvement requested:</strong> "${actionText}" — ` +
+                  `Regeneration with AI requires the Generate Pack flow to be re-run with this preference noted.` +
+                  `</div>` + s.content,
               }
             : s
         ),
