@@ -17,6 +17,9 @@ export interface PersistPayload {
   sessionId: string;
   niche: string;
   cloudSave: boolean;
+  languageMode: "single" | "bilingual";
+  targetLanguageName: string;
+  targetLanguageCode?: string;
   files: Array<{ name: string; type: string; size: number }>;
   pastedTextLength: number;
   stage: "gaps" | "final";
@@ -30,12 +33,16 @@ export async function persistGeneration(payload: PersistPayload) {
   // Note: table should be created by Supabase migration/admin setup.
   // Minimal schema suggestion:
   // generation_runs(session_id text primary key, niche text, cloud_save boolean,
+  // language_mode text, target_language_name text, target_language_code text,
   // files jsonb, pasted_text_length int, stage text, pack jsonb, created_at timestamptz)
   const { error } = await supabase.from("generation_runs").upsert(
     {
       session_id: payload.sessionId,
       niche: payload.niche,
       cloud_save: payload.cloudSave,
+      language_mode: payload.languageMode,
+      target_language_name: payload.targetLanguageName,
+      target_language_code: payload.targetLanguageCode || null,
       files: payload.files,
       pasted_text_length: payload.pastedTextLength,
       stage: payload.stage,

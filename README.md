@@ -17,6 +17,7 @@ A lightweight web app that helps small regulated businesses turn messy internal 
 - **Draft warnings** — Uncertain items clearly marked as "Needs Review"
 - **Rate limiting** — Built-in abuse protection
 - **Optional Cloud Save** — User-controlled; off = instant/no persistence, on = save generation data in Supabase
+- **Language support** — Choose any target language by name; optional bilingual mode (selected language + English)
 
 ## Getting Started
 

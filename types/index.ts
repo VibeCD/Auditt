@@ -24,6 +24,9 @@ export interface GeneratePackRequest {
   pastedText?: string;
   sessionId: string;
   cloudSave?: boolean;
+  languageMode?: "single" | "bilingual";
+  targetLanguageName?: string;
+  targetLanguageCode?: string;
 }
 
 export interface GapQuestion {
@@ -55,6 +58,9 @@ export interface GeneratedPack {
   gapAnswers?: Record<string, string>;
   status: "draft" | "ready";
   warnings?: string[];
+  languageMode?: "single" | "bilingual";
+  targetLanguageName?: string;
+  targetLanguageCode?: string;
 }
 
 export interface GenerateResponse {

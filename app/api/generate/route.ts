@@ -42,7 +42,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { niche, files, pastedText, sessionId, gapAnswers, cloudSave } = body;
+  const {
+    niche,
+    files,
+    pastedText,
+    sessionId,
+    gapAnswers,
+    cloudSave,
+    languageMode,
+    targetLanguageName,
+    targetLanguageCode,
+  } = body;
 
   if (!niche || !["restaurant", "daycare", "clinic"].includes(niche)) {
     return NextResponse.json(
@@ -73,7 +83,10 @@ export async function POST(request: NextRequest) {
       files || [],
       pastedText || "",
       sessionId,
-      gapAnswers
+      gapAnswers,
+      languageMode || "single",
+      targetLanguageName || "English",
+      targetLanguageCode || "en"
     );
 
     if (cloudSave) {
@@ -82,6 +95,9 @@ export async function POST(request: NextRequest) {
           sessionId,
           niche,
           cloudSave: true,
+          languageMode: languageMode || "single",
+          targetLanguageName: targetLanguageName || "English",
+          targetLanguageCode: targetLanguageCode || "en",
           files: (files || []).map((f) => ({
             name: f.name,
             type: f.type,

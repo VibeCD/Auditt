@@ -20,6 +20,21 @@ const PROGRESS_STEPS = [
   "Building binder",
 ];
 
+const SECONDARY_LANGUAGE = "English";
+
+const COMMON_LANGUAGES = [
+  { name: "English", code: "en" },
+  { name: "Hindi", code: "hi" },
+  { name: "Kannada", code: "kn" },
+  { name: "Tamil", code: "ta" },
+  { name: "Telugu", code: "te" },
+  { name: "Urdu", code: "ur" },
+  { name: "Spanish", code: "es" },
+  { name: "Arabic", code: "ar" },
+  { name: "French", code: "fr" },
+  { name: "German", code: "de" },
+];
+
 function UploadPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -33,6 +48,9 @@ function UploadPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [pack, setPack] = useState<GeneratedPack | null>(null);
   const [cloudSave, setCloudSave] = useState(false);
+  const [languageMode, setLanguageMode] = useState<"single" | "bilingual">("single");
+  const [targetLanguageName, setTargetLanguageName] = useState("English");
+  const [targetLanguageCode, setTargetLanguageCode] = useState("en");
   const [sessionId] = useState(() => generateSessionId());
 
   useEffect(() => {
@@ -63,6 +81,9 @@ function UploadPageContent() {
           pastedText,
           sessionId,
           cloudSave,
+          languageMode,
+          targetLanguageName,
+          targetLanguageCode,
         }),
       });
 
@@ -106,6 +127,9 @@ function UploadPageContent() {
           sessionId,
           gapAnswers,
           cloudSave,
+          languageMode,
+          targetLanguageName,
+          targetLanguageCode,
         }),
       });
 
@@ -242,6 +266,83 @@ function UploadPageContent() {
                   </p>
                 </div>
               </label>
+            </div>
+
+            <div className="bg-white/5 rounded-xl p-4 border border-white/10 space-y-3">
+              <p className="text-sm font-semibold text-white">Output language</p>
+              <label htmlFor="target-language-name" className="sr-only">
+                Target language name
+              </label>
+              <input
+                id="target-language-name"
+                list="language-options"
+                value={targetLanguageName}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setTargetLanguageName(value);
+                  const matched = COMMON_LANGUAGES.find(
+                    (lang) => lang.name.toLowerCase() === value.toLowerCase()
+                  );
+                  setTargetLanguageCode(matched?.code || "");
+                }}
+                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-sm text-white placeholder-blue-300/60"
+                placeholder="Type language name (e.g. Spanish, 日本語, Arabic)"
+              />
+              <datalist id="language-options">
+                {COMMON_LANGUAGES.map((lang) => (
+                  <option key={lang.code} value={lang.name} />
+                ))}
+              </datalist>
+
+              <div className="flex flex-wrap gap-2">
+                {COMMON_LANGUAGES.map((lang) => (
+                  <button
+                    key={lang.code}
+                    type="button"
+                    onClick={() => {
+                      setTargetLanguageName(lang.name);
+                      setTargetLanguageCode(lang.code);
+                    }}
+                    className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                      targetLanguageName.toLowerCase() === lang.name.toLowerCase()
+                        ? "bg-blue-600 border-blue-500 text-white"
+                        : "bg-white/5 border-white/20 text-blue-200 hover:bg-white/10"
+                    }`}
+                  >
+                    {lang.name}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLanguageMode("single")}
+                  className={`py-2 rounded-lg text-xs font-medium border ${
+                    languageMode === "single"
+                      ? "bg-blue-600 border-blue-500 text-white"
+                      : "bg-white/5 border-white/20 text-blue-200"
+                  }`}
+                >
+                  Single language
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLanguageMode("bilingual")}
+                  className={`py-2 rounded-lg text-xs font-medium border ${
+                    languageMode === "bilingual"
+                      ? "bg-blue-600 border-blue-500 text-white"
+                      : "bg-white/5 border-white/20 text-blue-200"
+                  }`}
+                >
+                  Bilingual ({SECONDARY_LANGUAGE} + selected)
+                </button>
+              </div>
+
+              <p className="text-[11px] text-blue-300">
+                Selected: {languageMode === "bilingual" ? `${targetLanguageName} + ${SECONDARY_LANGUAGE}` : targetLanguageName}
+                {targetLanguageCode ? ` (${targetLanguageCode})` : ""}
+              </p>
             </div>
 
             <button

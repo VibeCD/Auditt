@@ -127,6 +127,12 @@ function ReviewPageContent() {
                 {pack.niche.charAt(0).toUpperCase() + pack.niche.slice(1)} Compliance Binder ·{" "}
                 {pack.version} · {pack.sections.length} documents
               </p>
+              <p className="text-[11px] text-blue-400 mt-0.5">
+                Language: {pack.languageMode === "bilingual"
+                  ? `${pack.targetLanguageName || "English"} + English`
+                  : (pack.targetLanguageName || "English")}
+                {pack.targetLanguageCode ? ` (${pack.targetLanguageCode})` : ""}
+              </p>
             </div>
           </div>
 

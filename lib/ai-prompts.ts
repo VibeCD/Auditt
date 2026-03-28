@@ -3,22 +3,24 @@ import { Niche } from "@/types";
 export const GLOBAL_SYSTEM_PROMPT = `You are a structured data engine for a documentation generator app.
 
 CRITICAL OUTPUT RULES:
-- Output MUST be valid JSON only.
-- Do NOT wrap JSON in markdown code fences.
-- Do NOT include explanations, comments, or extra keys not in the schema.
-- Use double quotes for all strings.
-- Never output trailing commas.
-- If information is missing, use null or an empty string as specified, and add it to "missing_info".
+- Output MUST be valid JSON only. No markdown fences. No explanations.
+- Do NOT add keys not present in the schema.
+- Use double quotes for all strings. No trailing commas.
 - Do not invent laws/regulations. Do not claim legal compliance. Do not hallucinate facts.
-- Keep content practical, simple, and suitable for small businesses.
-- When you are uncertain, set "confidence" low and add a note in "warnings".
 
-SAFETY & ACCURACY:
-- Only use the provided source_text and user_answers.
-- If source_text conflicts internally, note the conflict in "warnings" and choose the safest interpretation.
+LANGUAGE RULES:
+- You will receive:
+  - mode: "single" or "bilingual"
+  - primary_language_name (e.g., "Kannada", "Spanish", "Arabic")
+  - primary_language_tag (optional BCP-47 like "kn", "es", "ar")
+  - secondary_language_name (only if bilingual; usually "English")
+- If mode="single": ALL user-facing text must be written ONLY in primary_language_name.
+- If mode="bilingual": Provide both languages using *_primary and *_secondary fields. Do not mix languages in one field.
+- If you cannot write well in the requested language, still attempt best-effort but add a warning.
 
-LANGUAGE:
-- Generate content in the requested language(s) exactly as specified in the schema.`;
+QUALITY:
+- Keep content simple, practical, and suitable for small businesses.
+- When uncertain, lower confidence and add to "warnings".`;
 
 export const INVALID_JSON_RETRY_PROMPT =
   "Your previous output was invalid JSON. Output valid JSON only.";
@@ -248,14 +250,58 @@ ${factsJson}`;
 }
 
 export function buildStage3Prompt(
+  mode: "single" | "bilingual",
+  primaryLanguageName: string,
+  primaryLanguageTag: string,
   sectionsJson: string,
   missingInfo: string[]
 ): string {
-  return `Task: Identify the minimum missing information required to generate a usable binder pack.
-Output a short list of tap-based questions suitable for non-technical users.
+  if (mode === "bilingual") {
+    return `Task: Create the minimum tap-based questions needed to complete a usable pack.
+Return bilingual questions.
 
-Return JSON matching this schema:
+Return JSON:
 {
+  "mode": "bilingual",
+  "primary_language_name": "",
+  "primary_language_tag": "",
+  "secondary_language_name": "English",
+  "questions": [
+    {
+      "id": "Q1",
+      "priority": "critical" | "recommended",
+      "question_primary": "",
+      "question_secondary": "",
+      "type": "yes_no" | "multiple_choice" | "number" | "short_text",
+      "options_primary": ["..."],
+      "options_secondary": ["..."],
+      "default": "",
+      "maps_to": "",
+      "why_needed_primary": "",
+      "why_needed_secondary": ""
+    }
+  ],
+  "warnings": ["..."],
+  "confidence": 0.0
+}
+
+Inputs:
+mode: ${mode}
+primary_language_name: ${primaryLanguageName}
+primary_language_tag: ${primaryLanguageTag}
+secondary_language_name: English
+sections_json: ${sectionsJson}
+missing_info: ${JSON.stringify(missingInfo)}`;
+  }
+
+  return `Task: Identify the minimum missing information required to generate a usable binder pack.
+Questions must be in the primary language only.
+
+Return JSON:
+{
+  "mode": "single",
+  "primary_language_name": "",
+  "primary_language_tag": "",
   "questions": [
     {
       "id": "Q1",
@@ -272,57 +318,73 @@ Return JSON matching this schema:
   "confidence": 0.0
 }
 
-Constraints:
-- Ask at most 7 questions.
-- Prefer yes_no or multiple_choice.
-- short_text only if unavoidable; keep it optional when possible.
-- If the binder can still be generated without an answer, mark priority as "recommended".
-
 Inputs:
-sections_json:
-${sectionsJson}
-missing_info_from_previous_steps:
-${JSON.stringify(missingInfo)}`;
+mode: ${mode}
+primary_language_name: ${primaryLanguageName}
+primary_language_tag: ${primaryLanguageTag}
+sections_json: ${sectionsJson}
+missing_info: ${JSON.stringify(missingInfo)}`;
 }
 
 export function buildStage4Prompt(
-  niche: Niche,
+  mode: "single" | "bilingual",
+  primaryLanguageName: string,
+  primaryLanguageTag: string,
   sectionsJson: string,
   userAnswersJson: string,
   preparedDate: string
 ): string {
-  const docsByNiche: Record<Niche, string> = {
-    restaurant: `Generate exactly these documents:
-D1 Cover + Index + Revision History (single markdown doc)
-D2 Cleaning & Sanitation SOP + Daily Checklist
-D3 Temperature Log Sheet (table)
-D4 Allergen Handling SOP (1 page)
-D5 Incident / Complaint Report Form
-D6 Roles & Responsibilities (short)`,
-    daycare: `Generate exactly these documents:
-D1 Cover + Index + Revision History (single markdown doc)
-D2 Child Safety SOP
-D3 Daily Cleaning Checklist
-D4 Incident Report Form
-D5 Pickup Authorization Form
-D6 Emergency Drill Checklist`,
-    clinic: `Generate exactly these documents:
-D1 Cover + Index + Revision History (single markdown doc)
-D2 Infection Control & Sterilization SOP
-D3 Patient Safety Checklist
-D4 Consent Form Template
-D5 Incident / Near-Miss Report Form
-D6 Waste Disposal Protocol`,
-  };
+  if (mode === "bilingual") {
+    return `Task: Generate the final binder document pack bilingually.
+Use only sections_json and user_answers. Do not invent facts.
 
-  return `Task: Generate the final document pack in Markdown for a ${niche} Binder.
-Use only the provided sections_json and user_answers. Do not invent facts.
-If something is missing, include a clearly marked "TODO" line in the document and add it to warnings.
-
-Return JSON matching this schema:
+Return JSON:
 {
-  "niche": "${niche}",
-  "language": "en",
+  "mode": "bilingual",
+  "primary_language_name": "",
+  "primary_language_tag": "",
+  "secondary_language_name": "English",
+  "binder": {
+    "title_primary": "",
+    "title_secondary": "",
+    "version": "v1",
+    "prepared_date": "",
+    "business_name": "",
+    "warnings_banner_primary": "",
+    "warnings_banner_secondary": ""
+  },
+  "documents": [
+    {
+      "doc_id": "D1",
+      "title_primary": "",
+      "title_secondary": "",
+      "doc_type": "cover_index" | "policy" | "checklist" | "form" | "log_sheet",
+      "markdown_primary": "",
+      "markdown_secondary": ""
+    }
+  ],
+  "warnings": ["..."],
+  "confidence": 0.0
+}
+
+Inputs:
+mode: ${mode}
+primary_language_name: ${primaryLanguageName}
+primary_language_tag: ${primaryLanguageTag}
+secondary_language_name: English
+sections_json: ${sectionsJson}
+user_answers: ${userAnswersJson}
+prepared_date: ${preparedDate}`;
+  }
+
+  return `Task: Generate the final binder document pack in the primary language.
+Use only sections_json and user_answers. Do not invent facts.
+
+Return JSON:
+{
+  "mode": "single",
+  "primary_language_name": "",
+  "primary_language_tag": "",
   "binder": {
     "title": "",
     "version": "v1",
@@ -335,31 +397,20 @@ Return JSON matching this schema:
       "doc_id": "D1",
       "title": "",
       "doc_type": "cover_index" | "policy" | "checklist" | "form" | "log_sheet",
-      "markdown": "",
-      "linked_section_ids": ["S1"]
+      "markdown": ""
     }
   ],
   "warnings": ["..."],
   "confidence": 0.0
 }
 
-${docsByNiche[niche]}
-
-Formatting requirements:
-- Use short headings.
-- Checklists must be Markdown checkboxes: "- [ ] item".
-- Tables must be Markdown tables.
-- Keep each doc under ~2 pages worth of text when rendered.
-
 Inputs:
-sections_json:
-${sectionsJson}
-
-user_answers (may be empty):
-${userAnswersJson}
-
-prepared_date (YYYY-MM-DD):
-${preparedDate}`;
+mode: ${mode}
+primary_language_name: ${primaryLanguageName}
+primary_language_tag: ${primaryLanguageTag}
+sections_json: ${sectionsJson}
+user_answers: ${userAnswersJson}
+prepared_date: ${preparedDate}`;
 }
 
 export function buildTransformPrompt(

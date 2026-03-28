@@ -131,37 +131,56 @@ type Stage2Sections = {
 };
 
 type Stage3Questions = {
+  mode?: "single" | "bilingual";
+  primary_language_name?: string;
+  primary_language_tag?: string;
+  secondary_language_name?: string;
   questions?: Array<{
     id: string;
     priority: "critical" | "recommended";
-    question: string;
+    question?: string;
+    question_primary?: string;
+    question_secondary?: string;
     type: "yes_no" | "multiple_choice" | "number" | "short_text";
     options?: string[];
+    options_primary?: string[];
+    options_secondary?: string[];
     default?: string;
     maps_to: string;
-    why_needed: string;
+    why_needed?: string;
+    why_needed_primary?: string;
+    why_needed_secondary?: string;
   }>;
   warnings?: string[];
   confidence?: number;
 };
 
 type Stage4Documents = {
-  niche: string;
-  // "kn" = Kannada language code used by product requirements.
-  language: "en" | "kn" | "mixed" | "unknown";
+  mode?: "single" | "bilingual";
+  primary_language_name?: string;
+  primary_language_tag?: string;
+  secondary_language_name?: string;
   binder?: {
     title?: string;
+    title_primary?: string;
+    title_secondary?: string;
     version?: string;
     prepared_date?: string;
     business_name?: string;
     warnings_banner?: string;
+    warnings_banner_primary?: string;
+    warnings_banner_secondary?: string;
   };
   documents?: Array<{
     doc_id: string;
-    title: string;
+    title?: string;
+    title_primary?: string;
+    title_secondary?: string;
     doc_type: "cover_index" | "policy" | "checklist" | "form" | "log_sheet";
-    markdown: string;
-    linked_section_ids: string[];
+    markdown?: string;
+    markdown_primary?: string;
+    markdown_secondary?: string;
+    linked_section_ids?: string[];
   }>;
   warnings?: string[];
   confidence?: number;
@@ -282,11 +301,17 @@ function sectionTypeFromDocType(
   return "policy";
 }
 
-function mapQuestionsToGapQuestions(input: Stage3Questions): GapQuestion[] {
+function mapQuestionsToGapQuestions(
+  input: Stage3Questions,
+  mode: "single" | "bilingual"
+): GapQuestion[] {
   const questions = input.questions || [];
   return questions.slice(0, MAX_GAP_QUESTIONS).map((q, index) => ({
     id: q.id || `Q${index + 1}`,
-    question: q.question,
+    question:
+      mode === "bilingual"
+        ? `${q.question_primary || ""}${q.question_secondary ? ` / ${q.question_secondary}` : ""}`.trim()
+        : (q.question || ""),
     type:
       q.type === "yes_no"
         ? "toggle"
@@ -295,7 +320,15 @@ function mapQuestionsToGapQuestions(input: Stage3Questions): GapQuestion[] {
           : q.type === "number"
             ? "number"
             : "text_short",
-    options: q.type === "yes_no" ? ["Yes", "No"] : q.options || [],
+    options:
+      q.type === "yes_no"
+        ? ["Yes", "No"]
+        : mode === "bilingual"
+          ? (q.options_primary || []).map((opt, i) => {
+              const secondary = q.options_secondary?.[i];
+              return secondary ? `${opt} / ${secondary}` : opt;
+            })
+          : q.options || [],
     required: q.priority === "critical",
     section: q.maps_to || "General",
   }));
@@ -306,6 +339,23 @@ function toShortDate(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatBilingualMarkdown(
+  titlePrimary: string,
+  titleSecondary: string,
+  markdownPrimary: string,
+  markdownSecondary: string
+): string {
+  return `## ${titlePrimary}
+
+${markdownPrimary}
+
+---
+
+## ${titleSecondary}
+
+${markdownSecondary}`;
 }
 
 function buildSourceText(files: UploadedFile[], pastedText: string): string {
@@ -334,7 +384,10 @@ export async function buildPack(
   files: UploadedFile[],
   pastedText: string,
   sessionId: string,
-  gapAnswers?: Record<string, string>
+  gapAnswers?: Record<string, string>,
+  languageMode: "single" | "bilingual" = "single",
+  targetLanguageName = "English",
+  targetLanguageCode = "en"
 ): Promise<BuildPackResult> {
   const sourceText = buildSourceText(files, pastedText);
 
@@ -354,6 +407,9 @@ export async function buildPack(
   if (gapAnswers === undefined) {
     const stage3 = await callNimJson<Stage3Questions>(
       buildStage3Prompt(
+        languageMode,
+        targetLanguageName,
+        targetLanguageCode,
         JSON.stringify(stage2),
         [
           ...(stage1.missing_info || []),
@@ -369,10 +425,13 @@ export async function buildPack(
       generatedAt: new Date().toISOString(),
       version: generateVersion(),
       sections: [],
-      gapQuestions: mapQuestionsToGapQuestions(stage3),
+      gapQuestions: mapQuestionsToGapQuestions(stage3, languageMode),
       gapAnswers: {},
       status: "draft",
       warnings: [...combinedWarnings, ...(stage3.warnings || [])],
+      languageMode,
+      targetLanguageName,
+      targetLanguageCode,
     };
 
     return {
@@ -383,7 +442,9 @@ export async function buildPack(
 
   const stage4 = await callNimJson<Stage4Documents>(
     buildStage4Prompt(
-      niche,
+      languageMode,
+      targetLanguageName,
+      targetLanguageCode,
       JSON.stringify(stage2),
       JSON.stringify(gapAnswers || {}),
       toShortDate(new Date())
@@ -391,16 +452,28 @@ export async function buildPack(
   );
 
   const sections: DocumentSection[] = (stage4.documents || []).map((doc, index) => {
-    const content = markdownToHtml(doc.markdown || "");
+    const markdown =
+      languageMode === "bilingual"
+        ? formatBilingualMarkdown(
+            doc.title_primary || doc.title || `Document ${index + 1}`,
+            doc.title_secondary || "English",
+            doc.markdown_primary || "",
+            doc.markdown_secondary || ""
+          )
+        : (doc.markdown || "");
+    const content = markdownToHtml(markdown);
     const missingItems =
-      (doc.markdown || "")
+      markdown
         .split(/\r?\n/)
         .filter((line) => line.includes("TODO"))
         .map((line) => line.trim()) || [];
 
     return {
       id: doc.doc_id || `doc-${index + 1}`,
-      title: doc.title || `Document ${index + 1}`,
+      title:
+        languageMode === "bilingual"
+          ? `${doc.title_primary || doc.title || `Document ${index + 1}`} / ${doc.title_secondary || "English"}`
+          : (doc.title || `Document ${index + 1}`),
       type: sectionTypeFromDocType(doc.doc_type),
       content,
       isDraft: missingItems.length > 0,
@@ -419,6 +492,9 @@ export async function buildPack(
     gapAnswers: gapAnswers || {},
     status: sections.some((s) => s.isDraft) ? "draft" : "ready",
     warnings: [...combinedWarnings, ...(stage4.warnings || [])],
+    languageMode,
+    targetLanguageName,
+    targetLanguageCode,
   };
 
   return {
