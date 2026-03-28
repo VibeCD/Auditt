@@ -150,6 +150,17 @@ function ReviewPageContent() {
           </div>
         )}
 
+        {pack.warnings && pack.warnings.length > 0 && (
+          <div className="mb-4 bg-amber-900/30 border border-amber-500/30 rounded-lg px-4 py-3 text-amber-200 text-xs">
+              <p className="font-semibold text-amber-300 mb-1">Generation warnings</p>
+              <ul className="list-disc list-inside space-y-0.5">
+              {pack.warnings.slice(0, 5).map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+              </ul>
+          </div>
+        )}
+
         {/* Disclaimer banner */}
         <div className="mb-4 bg-blue-900/30 border border-blue-500/20 rounded-lg px-4 py-3 text-xs text-blue-300">
           <strong>Review recommended:</strong> This documentation was AI-generated. Always verify with your local regulations before use. Items marked &ldquo;Draft&rdquo; require manual review.

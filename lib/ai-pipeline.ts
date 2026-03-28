@@ -1,22 +1,33 @@
 import OpenAI from "openai";
-import { DocumentSection, GapQuestion, GeneratedPack, Niche, UploadedFile } from "@/types";
-import { generateVersion, formatDate } from "@/lib/utils";
-import { MAX_GAP_QUESTIONS } from "@/lib/constants";
+import {
+  DocumentSection,
+  GapQuestion,
+  GeneratedPack,
+  Niche,
+  UploadedFile,
+} from "@/types";
+import { formatDate, generateVersion } from "@/lib/utils";
+import {
+  GLOBAL_SYSTEM_PROMPT,
+  INVALID_JSON_RETRY_PROMPT,
+  buildStage1Prompt,
+  buildStage2Prompt,
+  buildStage3Prompt,
+  buildStage4Prompt,
+} from "@/lib/ai-prompts";
+import { MAX_GAP_QUESTIONS, MAX_INPUT_CHARS, NIM_MODEL } from "@/lib/constants";
 
-// SECURITY: API key is ONLY used server-side via environment variable. Never exposed to client.
 function getNimClient(): OpenAI {
   const apiKey = process.env.NIM_API_KEY;
   if (!apiKey) {
     throw new Error("NIM_API_KEY environment variable is not set");
   }
+
   return new OpenAI({
     baseURL: "https://integrate.api.nvidia.com/v1",
     apiKey,
   });
 }
-
-const NIM_MODEL = "moonshotai/kimi-k2-thinking";
-const MAX_INPUT_CHARS = 6000;
 
 async function callNim(prompt: string, systemPrompt: string): Promise<string> {
   const client = getNimClient();
@@ -28,7 +39,7 @@ async function callNim(prompt: string, systemPrompt: string): Promise<string> {
       { role: "system", content: systemPrompt },
       { role: "user", content: prompt },
     ],
-    temperature: 0.7,
+    temperature: 0.3,
     top_p: 0.9,
     max_tokens: 8192,
     stream: true,
@@ -45,447 +56,386 @@ async function callNim(prompt: string, systemPrompt: string): Promise<string> {
   return result.trim();
 }
 
-function safeParseJson<T>(text: string, fallback: T): T {
-  // Try to extract JSON from response (model may wrap in markdown)
-  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const jsonStr = jsonMatch ? jsonMatch[1].trim() : text.trim();
+function parseJsonStrict<T>(raw: string): T {
+  const trimmed = raw.trim();
+  return JSON.parse(trimmed) as T;
+}
+
+async function callNimJson<T>(prompt: string): Promise<T> {
+  const first = await callNim(prompt, GLOBAL_SYSTEM_PROMPT);
   try {
-    return JSON.parse(jsonStr) as T;
+    return parseJsonStrict<T>(first);
   } catch {
-    // Try to find raw JSON object/array
-    const objMatch = jsonStr.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-    if (objMatch) {
-      try {
-        return JSON.parse(objMatch[1]) as T;
-      } catch {
-        return fallback;
-      }
+    const retryPrompt = `${INVALID_JSON_RETRY_PROMPT}\n\nOriginal task:\n${prompt}`;
+    const second = await callNim(retryPrompt, GLOBAL_SYSTEM_PROMPT);
+    return parseJsonStrict<T>(second);
+  }
+}
+
+type Stage1Facts = {
+  business_profile?: {
+    business_name?: string;
+    address?: string;
+    city?: string;
+    country?: string;
+    hours?: string;
+    staff_count?: number | null;
+  };
+  facts?: Array<{
+    id: string;
+    category:
+      | "cleaning"
+      | "safety"
+      | "food_handling"
+      | "incident"
+      | "training"
+      | "visitor"
+      | "privacy"
+      | "equipment"
+      | "other";
+    fact: string;
+    frequency: "daily" | "weekly" | "monthly" | "per_shift" | "as_needed" | "unknown";
+    role: string;
+    evidence_hint: string;
+    source_snippet: string;
+  }>;
+  entities?: {
+    roles?: string[];
+    areas?: string[];
+    tools_or_chemicals?: string[];
+    logs_or_records?: string[];
+  };
+  missing_info?: string[];
+  warnings?: string[];
+  confidence?: number;
+};
+
+type Stage2Sections = {
+  niche: string;
+  sections?: Array<{
+    section_id: string;
+    title: string;
+    intent: string;
+    bullets: string[];
+    checklist_items: Array<{
+      text: string;
+      frequency: "daily" | "weekly" | "per_shift" | "as_needed";
+      role: string;
+      evidence: string;
+    }>;
+    linked_fact_ids: string[];
+  }>;
+  missing_info?: string[];
+  warnings?: string[];
+  confidence?: number;
+};
+
+type Stage3Questions = {
+  questions?: Array<{
+    id: string;
+    priority: "critical" | "recommended";
+    question: string;
+    type: "yes_no" | "multiple_choice" | "number" | "short_text";
+    options?: string[];
+    default?: string;
+    maps_to: string;
+    why_needed: string;
+  }>;
+  warnings?: string[];
+  confidence?: number;
+};
+
+type Stage4Documents = {
+  niche: string;
+  // "kn" = Kannada language code used by product requirements.
+  language: "en" | "kn" | "mixed" | "unknown";
+  binder?: {
+    title?: string;
+    version?: string;
+    prepared_date?: string;
+    business_name?: string;
+    warnings_banner?: string;
+  };
+  documents?: Array<{
+    doc_id: string;
+    title: string;
+    doc_type: "cover_index" | "policy" | "checklist" | "form" | "log_sheet";
+    markdown: string;
+    linked_section_ids: string[];
+  }>;
+  warnings?: string[];
+  confidence?: number;
+};
+
+function markdownToHtml(markdown: string): string {
+  const lines = markdown.split(/\r?\n/);
+  const out: string[] = [];
+  let inUl = false;
+  let inTable = false;
+
+  const closeUl = () => {
+    if (inUl) {
+      out.push("</ul>");
+      inUl = false;
     }
-    return fallback;
-  }
-}
-
-// Step 1: Extract structured facts from raw input
-async function extractFacts(
-  niche: Niche,
-  rawContent: string
-): Promise<Record<string, string[]>> {
-  const systemPrompt = `You are a compliance documentation assistant. Extract structured facts from raw business notes/documents.
-Return ONLY valid JSON with no markdown formatting. Extract arrays of facts for each category.`;
-
-  const prompt = `Business type: ${niche}
-
-Raw content from uploaded documents:
-${rawContent.substring(0, MAX_INPUT_CHARS)}
-
-Extract all facts into this JSON structure:
-{
-  "tasks": ["list of tasks mentioned"],
-  "frequencies": ["cleaning frequencies, schedule items"],
-  "roles": ["staff roles and responsibilities"],
-  "locations": ["areas/zones mentioned"],
-  "equipment": ["equipment and tools mentioned"],
-  "chemicals": ["cleaning products, chemicals mentioned"],
-  "procedures": ["specific procedures described"],
-  "businessInfo": ["business name, hours, contact info"],
-  "rules": ["specific rules or policies mentioned"],
-  "incidents": ["any incident types or history mentioned"]
-}`;
-
-  const response = await callNim(prompt, systemPrompt);
-  return safeParseJson(response, {
-    tasks: [],
-    frequencies: [],
-    roles: [],
-    locations: [],
-    equipment: [],
-    chemicals: [],
-    procedures: [],
-    businessInfo: [],
-    rules: [],
-    incidents: [],
-  });
-}
-
-// Step 2: Detect gaps and generate questions
-async function detectGaps(
-  niche: Niche,
-  facts: Record<string, string[]>
-): Promise<GapQuestion[]> {
-  const systemPrompt = `You are a compliance documentation assistant. Identify missing information needed for a complete compliance binder.
-Return ONLY valid JSON array of gap questions. No markdown.`;
-
-  const nicheRequirements: Record<Niche, string[]> = {
-    restaurant: [
-      "business name",
-      "cleaning schedule (daily/weekly/monthly)",
-      "temperature control procedures",
-      "allergen management",
-      "staff hygiene rules",
-      "pest control frequency",
-      "food storage zones",
-      "incident reporting process",
-    ],
-    daycare: [
-      "business name",
-      "child drop-off/pickup procedures",
-      "child safety protocols",
-      "cleaning schedule",
-      "incident reporting",
-      "visitor sign-in procedures",
-      "emergency procedures",
-      "staff-to-child ratios",
-    ],
-    clinic: [
-      "clinic name",
-      "sterilisation procedures and frequency",
-      "patient consent process",
-      "infection control protocols",
-      "equipment maintenance schedule",
-      "waste disposal methods",
-      "staff compliance procedures",
-      "incident reporting",
-    ],
   };
 
-  const prompt = `Business type: ${niche}
-Required information for a complete binder: ${JSON.stringify(nicheRequirements[niche])}
-
-Already extracted facts:
-${JSON.stringify(facts, null, 2)}
-
-Identify UP TO 7 critical missing items. Return a JSON array of gap questions:
-[
-  {
-    "id": "q1",
-    "question": "What is your business name?",
-    "type": "text_short",
-    "options": null,
-    "required": true,
-    "section": "Business Info"
-  },
-  {
-    "id": "q2",
-    "question": "How often do you clean the kitchen floor?",
-    "type": "multiple_choice",
-    "options": ["Daily", "Twice daily", "Weekly", "After each shift"],
-    "required": true,
-    "section": "Cleaning SOP"
-  }
-]
-
-Only ask about truly MISSING items not found in the extracted facts. Max 7 questions.`;
-
-  const response = await callNim(prompt, systemPrompt);
-  const questions = safeParseJson<GapQuestion[]>(response, []);
-  return questions.slice(0, MAX_GAP_QUESTIONS);
-}
-
-// Step 3: Generate individual document content
-async function generateDocument(
-  niche: Niche,
-  docType: string,
-  facts: Record<string, string[]>,
-  gapAnswers: Record<string, string>,
-  businessName: string
-): Promise<{ content: string; isDraft: boolean; missingItems: string[] }> {
-  const systemPrompt = `You are a professional compliance documentation writer. Generate clear, actionable business compliance documents.
-Format output as clean HTML (use h2, h3, p, ul, li, table, tr, td tags). No markdown. Keep language simple and practical.
-IMPORTANT: Never claim legal compliance guarantee. Mark uncertain items with [NEEDS REVIEW]. Do not invent laws.`;
-
-  const prompts: Record<string, string> = {
-    "cleaning-sop": `Generate a comprehensive Cleaning SOP and Daily Checklist for a ${niche} business.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Cleaning SOP header with business name, version date, "Prepared on: ${formatDate(new Date())}"
-2. Daily cleaning checklist (morning/during operations/closing)
-3. Weekly deep-clean schedule
-4. Staff responsibilities section
-5. Record-keeping instructions
-Mark any unclear items as [NEEDS REVIEW].`,
-
-    "food-temperature-log": `Generate a Food Storage & Temperature Log Sheet for a restaurant/food business.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Header with business name, version, date
-2. Temperature monitoring schedule and required ranges
-3. Daily temperature log table (date, time, location, reading, initials)
-4. Action steps if temperature is out of range
-5. Monthly review checklist
-Mark any unclear items as [NEEDS REVIEW].`,
-
-    "allergen-sop": `Generate an Allergen Handling SOP for a restaurant/food business.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Header with business name, version, date
-2. List of major allergens to manage
-3. Staff responsibilities for allergen control
-4. Customer communication procedures
-5. Cross-contamination prevention steps
-6. Training requirements
-Mark any unclear items as [NEEDS REVIEW].`,
-
-    "incident-report-form": `Generate an Incident/Complaint Report Form for a ${niche} business.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Header with business name, version, date
-2. Incident details section (date, time, location, type)
-3. Description of incident (what happened)
-4. People involved section
-5. Immediate action taken
-6. Follow-up required
-7. Manager signature/review section
-Mark any unclear items as [NEEDS REVIEW].`,
-
-    "staff-hygiene-sop": `Generate a Staff Hygiene SOP and Training Sign-off Sheet for a ${niche} business.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Header with business name, version, date
-2. Personal hygiene standards (handwashing, uniform, illness policy)
-3. Step-by-step handwashing procedure
-4. When to report illness
-5. Training sign-off table (staff name, date, trainer, signature)
-Mark any unclear items as [NEEDS REVIEW].`,
-
-    "pest-control-log": `Generate a Pest Control Record Sheet for a ${niche} business.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Header with business name, version, date
-2. Pest control contractor details section
-3. Visit log table (date, time, contractor, areas treated, findings)
-4. Action taken log
-5. Next inspection date tracking
-Mark any unclear items as [NEEDS REVIEW].`,
-
-    "child-safety-sop": `Generate a Child Safety SOP for a daycare/childcare centre.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Header with centre name, version, date
-2. Supervision and staff-to-child ratio policies
-3. Safe environment check procedures
-4. Child wellbeing monitoring
-5. Reporting obligations
-6. Staff responsibilities
-Mark any unclear items as [NEEDS REVIEW].`,
-
-    "pickup-authorization-form": `Generate a Child Pickup Authorization Form for a daycare.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Header with centre name, version, date
-2. Child information section
-3. Authorized persons list (up to 5)
-4. Emergency contact details
-5. Unauthorized persons restriction section
-6. Parent/Guardian signature
-Mark any unclear items as [NEEDS REVIEW].`,
-
-    "visitor-log": `Generate a Visitor Log Sheet for a ${niche} business.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Header with business name, version, date
-2. Visitor log table (date, time in/out, name, purpose, host, signature)
-3. Visitor rules/instructions
-4. Emergency procedure note for visitors
-Mark any unclear items as [NEEDS REVIEW].`,
-
-    "emergency-drill-checklist": `Generate an Emergency Drill Checklist for a daycare/childcare centre.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Header with centre name, version, date
-2. Fire drill procedure checklist
-3. Evacuation route description
-4. Drill record table (date, time, duration, issues, sign-off)
-5. Post-drill review section
-Mark any unclear items as [NEEDS REVIEW].`,
-
-    "infection-control-sop": `Generate an Infection Control & Sterilisation SOP for a clinic/dental/physio practice.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Header with clinic name, version, date
-2. Hand hygiene protocol (5 moments)
-3. PPE usage guidelines
-4. Sterilisation procedure steps
-5. Surface disinfection schedule
-6. Waste disposal categories
-Mark any unclear items as [NEEDS REVIEW].`,
-
-    "consent-form": `Generate a Patient Consent Form Template for a clinic/dental/physio practice.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Header with clinic name, version, date
-2. Patient information section
-3. Treatment description area
-4. Risks and benefits summary (general)
-5. Patient rights statement
-6. Consent declaration and signature block
-7. Disclaimer: "This template requires review by qualified legal/medical professional before use"
-Mark any unclear items as [NEEDS REVIEW].`,
-
-    "equipment-maintenance-log": `Generate an Equipment Maintenance Log for a ${niche} business.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Header with business name, version, date
-2. Equipment register table
-3. Maintenance schedule by equipment type
-4. Maintenance record log (date, equipment, issue, action, technician, next service)
-5. Sign-off section
-Mark any unclear items as [NEEDS REVIEW].`,
-
-    "waste-disposal-protocol": `Generate a Waste Disposal Protocol for a clinic/dental/physio practice.
-Business Name: ${businessName || "Business Name"}
-Known facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-
-Create an HTML document with:
-1. Header with clinic name, version, date
-2. Waste categories (clinical, sharps, general, pharmaceutical)
-3. Disposal procedures per category
-4. Collection schedule and contractor details
-5. Staff responsibilities
-6. Record-keeping requirements
-Mark any unclear items as [NEEDS REVIEW].`,
+  const closeTable = () => {
+    if (inTable) {
+      out.push("</table>");
+      inTable = false;
+    }
   };
 
-  const promptText = prompts[docType] || `Generate a ${docType} compliance document for a ${niche} business named "${businessName}".
-Use these facts: ${JSON.stringify({ ...facts, ...gapAnswers })}
-Format as clean HTML. Include business name, version date, and "Prepared on: ${formatDate(new Date())}".
-Mark any unclear items as [NEEDS REVIEW].`;
+  for (const raw of lines) {
+    const line = raw.trim();
 
-  try {
-    const content = await callNim(promptText, systemPrompt);
-    const missingItems = (content.match(/\[NEEDS REVIEW\]/g) || []).map(
-      (_, i) => `Item ${i + 1} needs review`
-    );
-    return {
-      content,
-      isDraft: missingItems.length > 0,
-      missingItems,
-    };
-  } catch {
-    return {
-      content: `<h2>${docType}</h2><p>[NEEDS REVIEW] Document generation failed. Please regenerate.</p>`,
-      isDraft: true,
-      missingItems: ["Generation failed - please retry"],
-    };
+    if (!line) {
+      closeUl();
+      closeTable();
+      continue;
+    }
+
+    if (line.startsWith("### ")) {
+      closeUl();
+      closeTable();
+      out.push(`<h3>${line.substring(4)}</h3>`);
+      continue;
+    }
+
+    if (line.startsWith("## ")) {
+      closeUl();
+      closeTable();
+      out.push(`<h2>${line.substring(3)}</h2>`);
+      continue;
+    }
+
+    if (line.startsWith("# ")) {
+      closeUl();
+      closeTable();
+      out.push(`<h2>${line.substring(2)}</h2>`);
+      continue;
+    }
+
+    if (line.startsWith("- [ ] ")) {
+      closeTable();
+      if (!inUl) {
+        out.push("<ul>");
+        inUl = true;
+      }
+      out.push(`<li><input type="checkbox" disabled /> ${line.substring(6)}</li>`);
+      continue;
+    }
+
+    if (line.startsWith("- ")) {
+      closeTable();
+      if (!inUl) {
+        out.push("<ul>");
+        inUl = true;
+      }
+      out.push(`<li>${line.substring(2)}</li>`);
+      continue;
+    }
+
+    if (line.includes("|") && line.startsWith("|") && line.endsWith("|")) {
+      closeUl();
+      const cells = line
+        .split("|")
+        .slice(1, -1)
+        .map((c) => c.trim());
+
+      if (cells.every((c) => /^:?-{3,}:?$/.test(c))) {
+        continue;
+      }
+
+      if (!inTable) {
+        out.push("<table>");
+        inTable = true;
+      }
+
+      out.push(
+        `<tr>${cells
+          .map((c) => `<td>${c || "&nbsp;"}</td>`)
+          .join("")}</tr>`
+      );
+      continue;
+    }
+
+    closeUl();
+    closeTable();
+    out.push(`<p>${line}</p>`);
   }
+
+  closeUl();
+  closeTable();
+
+  return out.join("\n");
 }
 
-// Main pipeline: Build full pack
+function sectionTypeFromDocType(
+  docType: "cover_index" | "policy" | "checklist" | "form" | "log_sheet"
+): DocumentSection["type"] {
+  if (docType === "checklist") return "checklist";
+  if (docType === "form") return "form";
+  if (docType === "log_sheet") return "log";
+  if (docType === "cover_index") return "cover";
+  return "policy";
+}
+
+function mapQuestionsToGapQuestions(input: Stage3Questions): GapQuestion[] {
+  const questions = input.questions || [];
+  return questions.slice(0, MAX_GAP_QUESTIONS).map((q, index) => ({
+    id: q.id || `Q${index + 1}`,
+    question: q.question,
+    type:
+      q.type === "yes_no"
+        ? "toggle"
+        : q.type === "multiple_choice"
+          ? "multiple_choice"
+          : q.type === "number"
+            ? "number"
+            : "text_short",
+    options: q.type === "yes_no" ? ["Yes", "No"] : q.options || [],
+    required: q.priority === "critical",
+    section: q.maps_to || "General",
+  }));
+}
+
+function toShortDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function buildSourceText(files: UploadedFile[], pastedText: string): string {
+  return [
+    pastedText || "",
+    ...files.map((f) => `[File: ${f.name}]\n${f.content || ""}`),
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, MAX_INPUT_CHARS);
+}
+
+export interface BuildPackResult {
+  pack: GeneratedPack;
+  telemetry: {
+    sourceText: string;
+    stage1: Stage1Facts;
+    stage2: Stage2Sections;
+    stage3?: Stage3Questions;
+    stage4?: Stage4Documents;
+  };
+}
+
 export async function buildPack(
   niche: Niche,
   files: UploadedFile[],
   pastedText: string,
   sessionId: string,
   gapAnswers?: Record<string, string>
-): Promise<GeneratedPack> {
-  // Combine all uploaded content
-  const rawContent = [
-    pastedText || "",
-    ...files.map((f) => `[File: ${f.name}]\n${f.content || ""}`),
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+): Promise<BuildPackResult> {
+  const sourceText = buildSourceText(files, pastedText);
 
-  // Step 1: Extract facts
-  const facts = await extractFacts(niche, rawContent);
+  const stage1 = await callNimJson<Stage1Facts>(buildStage1Prompt(sourceText));
+  const stage2 = await callNimJson<Stage2Sections>(
+    buildStage2Prompt(niche, JSON.stringify(stage1))
+  );
 
-  // Extract business name from facts or gap answers
+  const combinedWarnings: string[] = [
+    ...(stage1.warnings || []),
+    ...(stage2.warnings || []),
+  ];
+
   const businessName =
-    gapAnswers?.business_name ||
-    facts.businessInfo
-      ?.find((i) => i.toLowerCase().includes("name"))
-      ?.split(":")?.[1]
-      ?.trim() ||
-    "";
+    gapAnswers?.business_name || stage1.business_profile?.business_name || "Your Business";
 
-  // Step 2: Detect gaps (only if no answers provided yet)
-  let gapQuestions: GapQuestion[] = [];
-  if (!gapAnswers) {
-    gapQuestions = await detectGaps(niche, facts);
-  }
+  if (gapAnswers === undefined) {
+    const stage3 = await callNimJson<Stage3Questions>(
+      buildStage3Prompt(
+        JSON.stringify(stage2),
+        [
+          ...(stage1.missing_info || []),
+          ...(stage2.missing_info || []),
+        ]
+      )
+    );
 
-  // If gap answers provided, generate full documents
-  const sections: DocumentSection[] = [];
-  if (gapAnswers !== undefined) {
-    const docSets: Record<Niche, Array<{ id: string; title: string; type: DocumentSection["type"]; docKey: string }>> = {
-      restaurant: [
-        { id: "cleaning", title: "Cleaning SOP & Daily Checklist", type: "checklist", docKey: "cleaning-sop" },
-        { id: "temperature", title: "Food Storage & Temperature Log", type: "log", docKey: "food-temperature-log" },
-        { id: "allergen", title: "Allergen Handling SOP", type: "sop", docKey: "allergen-sop" },
-        { id: "incident", title: "Incident / Complaint Report Form", type: "form", docKey: "incident-report-form" },
-        { id: "staff-hygiene", title: "Staff Hygiene SOP & Training Sign-off", type: "sop", docKey: "staff-hygiene-sop" },
-        { id: "pest-control", title: "Pest Control Record Sheet", type: "log", docKey: "pest-control-log" },
-      ],
-      daycare: [
-        { id: "child-safety", title: "Child Safety SOP", type: "sop", docKey: "child-safety-sop" },
-        { id: "cleaning", title: "Daily Cleaning Checklist", type: "checklist", docKey: "cleaning-sop" },
-        { id: "incident", title: "Incident Report Form", type: "form", docKey: "incident-report-form" },
-        { id: "pickup-auth", title: "Pickup Authorization Form", type: "form", docKey: "pickup-authorization-form" },
-        { id: "visitor-log", title: "Visitor Log Sheet", type: "log", docKey: "visitor-log" },
-        { id: "staff-training", title: "Staff Training Sign-off", type: "policy", docKey: "staff-hygiene-sop" },
-        { id: "emergency-drill", title: "Emergency Drill Checklist", type: "checklist", docKey: "emergency-drill-checklist" },
-      ],
-      clinic: [
-        { id: "infection-control", title: "Infection Control & Sterilisation SOP", type: "sop", docKey: "infection-control-sop" },
-        { id: "patient-safety", title: "Patient Safety Checklist", type: "checklist", docKey: "cleaning-sop" },
-        { id: "consent-form", title: "Patient Consent Form Template", type: "form", docKey: "consent-form" },
-        { id: "equipment-log", title: "Equipment Maintenance Log", type: "log", docKey: "equipment-maintenance-log" },
-        { id: "staff-compliance", title: "Staff Compliance Sign-off", type: "policy", docKey: "staff-hygiene-sop" },
-        { id: "incident-report", title: "Incident & Near-Miss Report Form", type: "form", docKey: "incident-report-form" },
-        { id: "waste-disposal", title: "Waste Disposal Protocol", type: "policy", docKey: "waste-disposal-protocol" },
-      ],
+    const pack: GeneratedPack = {
+      sessionId,
+      niche,
+      businessName,
+      generatedAt: new Date().toISOString(),
+      version: generateVersion(),
+      sections: [],
+      gapQuestions: mapQuestionsToGapQuestions(stage3),
+      gapAnswers: {},
+      status: "draft",
+      warnings: [...combinedWarnings, ...(stage3.warnings || [])],
     };
 
-    const docs = docSets[niche];
-    for (const doc of docs) {
-      const result = await generateDocument(niche, doc.docKey, facts, gapAnswers, businessName);
-      sections.push({
-        id: doc.id,
-        title: doc.title,
-        type: doc.type,
-        content: result.content,
-        isDraft: result.isDraft,
-        missingItems: result.missingItems,
-      });
-    }
+    return {
+      pack,
+      telemetry: { sourceText, stage1, stage2, stage3 },
+    };
   }
 
-  const hasReviewItems = sections.some((s) => s.isDraft);
+  const stage4 = await callNimJson<Stage4Documents>(
+    buildStage4Prompt(
+      niche,
+      JSON.stringify(stage2),
+      JSON.stringify(gapAnswers || {}),
+      toShortDate(new Date())
+    )
+  );
 
-  return {
+  const sections: DocumentSection[] = (stage4.documents || []).map((doc, index) => {
+    const content = markdownToHtml(doc.markdown || "");
+    const missingItems =
+      (doc.markdown || "")
+        .split(/\r?\n/)
+        .filter((line) => line.includes("TODO"))
+        .map((line) => line.trim()) || [];
+
+    return {
+      id: doc.doc_id || `doc-${index + 1}`,
+      title: doc.title || `Document ${index + 1}`,
+      type: sectionTypeFromDocType(doc.doc_type),
+      content,
+      isDraft: missingItems.length > 0,
+      missingItems,
+    };
+  });
+
+  const pack: GeneratedPack = {
     sessionId,
     niche,
-    businessName: businessName || "Your Business",
+    businessName: stage4.binder?.business_name || businessName,
     generatedAt: new Date().toISOString(),
-    version: generateVersion(),
+    version: stage4.binder?.version || generateVersion(),
     sections,
-    gapQuestions,
+    gapQuestions: [],
     gapAnswers: gapAnswers || {},
-    status: hasReviewItems ? "draft" : "ready",
+    status: sections.some((s) => s.isDraft) ? "draft" : "ready",
+    warnings: [...combinedWarnings, ...(stage4.warnings || [])],
   };
+
+  return {
+    pack,
+    telemetry: { sourceText, stage1, stage2, stage4 },
+  };
+}
+
+export async function runTransformAction(
+  _action: "shorten" | "checklist" | "formal",
+  content: string
+): Promise<string> {
+  // Reserved for future API endpoint integration in results actions.
+  // Keep consistent with strict JSON prompt pack strategy.
+  return content;
+}
+
+export function humanPreparedDate(isoDate: string): string {
+  return formatDate(isoDate);
 }

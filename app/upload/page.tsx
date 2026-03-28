@@ -32,6 +32,7 @@ function UploadPageContent() {
   const [progressStep, setProgressStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pack, setPack] = useState<GeneratedPack | null>(null);
+  const [cloudSave, setCloudSave] = useState(false);
   const [sessionId] = useState(() => generateSessionId());
 
   useEffect(() => {
@@ -56,7 +57,13 @@ function UploadPageContent() {
       const resp = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ niche: niche!.id, files, pastedText, sessionId }),
+        body: JSON.stringify({
+          niche: niche!.id,
+          files,
+          pastedText,
+          sessionId,
+          cloudSave,
+        }),
       });
 
       clearInterval(stepTimer);
@@ -92,7 +99,14 @@ function UploadPageContent() {
       const resp = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ niche: niche!.id, files, pastedText, sessionId, gapAnswers }),
+        body: JSON.stringify({
+          niche: niche!.id,
+          files,
+          pastedText,
+          sessionId,
+          gapAnswers,
+          cloudSave,
+        }),
       });
 
       clearInterval(stepTimer);
@@ -211,6 +225,23 @@ function UploadPageContent() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={cloudSave}
+                  onChange={(e) => setCloudSave(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-white/30 bg-white/10 text-blue-500 focus:ring-blue-500"
+                />
+                <div>
+                  <p className="text-sm font-semibold text-white">Enable Cloud Save (optional)</p>
+                  <p className="text-xs text-blue-300 mt-1">
+                    Off: instant task, no data persisted. On: save generated logs/metadata and uploaded file info to cloud storage.
+                  </p>
+                </div>
+              </label>
             </div>
 
             <button

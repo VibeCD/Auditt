@@ -16,12 +16,19 @@ A lightweight web app that helps small regulated businesses turn messy internal 
 - **Binder PDF export** — Branded, versioned, audit-ready PDF
 - **Draft warnings** — Uncertain items clearly marked as "Needs Review"
 - **Rate limiting** — Built-in abuse protection
+- **Optional Cloud Save** — User-controlled; off = instant/no persistence, on = save generation data in Supabase
 
 ## Getting Started
 
 1. Copy `.env.example` to `.env.local` and fill in your NIM API key:
    ```
    NIM_API_KEY=nvapi-your-key-here
+   ```
+
+   Optional for cloud save:
+   ```
+   SUPABASE_URL=https://your-project-ref.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
    ```
 
 2. Install dependencies:
@@ -39,6 +46,7 @@ A lightweight web app that helps small regulated businesses turn messy internal 
 ## Security
 
 - The NIM API key is **server-side only** — never exposed to the browser
+- Supabase service role key is **server-side only** — never exposed to the browser
 - Rate limiting: 10 requests per IP per hour
 - All AI processing happens via secure API routes
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildPack } from "@/lib/ai-pipeline";
 import { GeneratePackRequest } from "@/types";
 import { RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "@/lib/constants";
+import { persistGeneration } from "@/lib/supabase-server";
 
 // Rate limiting: simple in-memory store (production should use a shared store like Redis/Vercel KV)
 const requestCounts = new Map<string, { count: number; resetAt: number }>();
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { niche, files, pastedText, sessionId, gapAnswers } = body;
+  const { niche, files, pastedText, sessionId, gapAnswers, cloudSave } = body;
 
   if (!niche || !["restaurant", "daycare", "clinic"].includes(niche)) {
     return NextResponse.json(
@@ -67,13 +68,40 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const pack = await buildPack(
+    const { pack, telemetry } = await buildPack(
       niche,
       files || [],
       pastedText || "",
       sessionId,
       gapAnswers
     );
+
+    if (cloudSave) {
+      try {
+        await persistGeneration({
+          sessionId,
+          niche,
+          cloudSave: true,
+          files: (files || []).map((f) => ({
+            name: f.name,
+            type: f.type,
+            size: f.size,
+          })),
+          pastedTextLength: (pastedText || "").length,
+          stage: gapAnswers ? "final" : "gaps",
+          pack: {
+            ...pack,
+            telemetry,
+          },
+        });
+      } catch (persistError) {
+        const message =
+          persistError instanceof Error
+            ? persistError.message
+            : "Cloud save failed";
+        pack.warnings = [...(pack.warnings || []), `Cloud save warning: ${message}`];
+      }
+    }
 
     return NextResponse.json({ success: true, pack });
   } catch (error) {

@@ -23,6 +23,7 @@ export interface GeneratePackRequest {
   files: UploadedFile[];
   pastedText?: string;
   sessionId: string;
+  cloudSave?: boolean;
 }
 
 export interface GapQuestion {
@@ -53,6 +54,7 @@ export interface GeneratedPack {
   gapQuestions: GapQuestion[];
   gapAnswers?: Record<string, string>;
   status: "draft" | "ready";
+  warnings?: string[];
 }
 
 export interface GenerateResponse {
