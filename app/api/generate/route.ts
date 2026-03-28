@@ -44,6 +44,10 @@ export async function POST(request: NextRequest) {
 
   const {
     niche,
+    generationMode,
+    customAudience,
+    customPurposes,
+    customTone,
     files,
     pastedText,
     sessionId,
@@ -54,7 +58,15 @@ export async function POST(request: NextRequest) {
     targetLanguageCode,
   } = body;
 
-  if (!niche || !["restaurant", "daycare", "clinic"].includes(niche)) {
+  const mode = generationMode || "guided";
+  if (!["guided", "custom"].includes(mode)) {
+    return NextResponse.json(
+      { success: false, error: "Invalid generation mode" },
+      { status: 400 }
+    );
+  }
+
+  if (mode === "guided" && (!niche || !["restaurant", "daycare", "clinic"].includes(niche))) {
     return NextResponse.json(
       { success: false, error: "Invalid or missing niche" },
       { status: 400 }
@@ -79,25 +91,33 @@ export async function POST(request: NextRequest) {
 
   try {
     const { pack, telemetry } = await buildPack(
-      niche,
+      mode === "custom" ? "custom" : (niche as "restaurant" | "daycare" | "clinic"),
       files || [],
       pastedText || "",
       sessionId,
       gapAnswers,
       languageMode || "single",
       targetLanguageName || "English",
-      targetLanguageCode || "en"
+      targetLanguageCode || "en",
+      mode,
+      customAudience || "general",
+      customPurposes || [],
+      customTone || "simple"
     );
 
     if (cloudSave) {
       try {
         await persistGeneration({
           sessionId,
-          niche,
+          niche: mode === "custom" ? "custom" : (niche || "unknown"),
           cloudSave: true,
           languageMode: languageMode || "single",
           targetLanguageName: targetLanguageName || "English",
           targetLanguageCode: targetLanguageCode || "en",
+          generationMode: mode,
+          customAudience: customAudience || "general",
+          customPurposes: customPurposes || [],
+          customTone: customTone || "simple",
           files: (files || []).map((f) => ({
             name: f.name,
             type: f.type,

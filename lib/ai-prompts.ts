@@ -444,3 +444,333 @@ Return JSON: { "result": "" }
 content:
 ${content}`;
 }
+
+export function buildCustomSchemaGeneratorPrompt(
+  mode: "single" | "bilingual",
+  primaryLanguageName: string,
+  primaryLanguageTag: string,
+  audience: "student" | "teacher" | "professional" | "general",
+  purposeChoices: string[],
+  tone: "simple" | "formal",
+  fileTypes: string[],
+  sourceTextPreview: string
+): string {
+  return `Task: Create a pack schema for generating a useful document pack from messy user uploads.
+The schema must require minimal user input and must be achievable from typical raw notes.
+
+Return JSON matching EXACTLY this schema:
+{
+  "pack_type": "custom",
+  "pack_name": "",
+  "mode": "single" | "bilingual",
+  "primary_language_name": "",
+  "primary_language_tag": "",
+  "secondary_language_name": "",
+  "audience": "student" | "teacher" | "professional" | "general",
+  "purpose": "",
+  "tone": "simple" | "formal",
+  "sections": [
+    {
+      "section_id": "S1",
+      "title_internal": "",
+      "intent_internal": "",
+      "expected_content_types": ["bullets" | "checklist" | "table" | "paragraphs"]
+    }
+  ],
+  "documents": [
+    {
+      "doc_id": "D1",
+      "title_internal": "",
+      "doc_type": "notes" | "summary" | "checklist" | "plan" | "report" | "template",
+      "format": "markdown",
+      "max_length": "short" | "medium",
+      "required_section_ids": ["S1"]
+    }
+  ],
+  "ui_questions_seed": [
+    {
+      "id": "Q1",
+      "priority": "critical" | "recommended",
+      "question_intent": "",
+      "type": "yes_no" | "multiple_choice" | "number" | "short_text",
+      "options_internal": ["..."],
+      "default": "",
+      "maps_to": "",
+      "why_needed_internal": ""
+    }
+  ],
+  "rules": {
+    "do_not_invent_facts": true,
+    "add_todo_when_missing": true,
+    "avoid_sensitive_advice": true
+  },
+  "warnings": ["..."],
+  "confidence": 0.0
+}
+
+Schema rules:
+- Keep sections between 3 and 7.
+- Keep documents between 1 and 4.
+- Prefer doc packs that are broadly useful and not niche-specific.
+- ui_questions_seed must be at most 5 items and should be tap-friendly.
+
+Inputs:
+mode: ${mode}
+primary_language_name: ${primaryLanguageName}
+primary_language_tag: ${primaryLanguageTag}
+secondary_language_name: ${mode === "bilingual" ? "English" : ""}
+audience: ${audience}
+purpose_choices (array of strings): ${JSON.stringify(purposeChoices)}
+tone: ${tone}
+user_uploaded_file_types (array): ${JSON.stringify(fileTypes)}
+source_text_preview (first 1500 chars, may be empty): ${(sourceTextPreview || "").slice(0, 1500)}`;
+}
+
+export function buildCustomFactsExtractorPrompt(sourceText: string): string {
+  return `Task: Extract concrete facts and key points from the source_text.
+Facts should be atomic and traceable. Do not invent missing information.
+
+Return JSON matching EXACTLY this schema:
+{
+  "facts": [
+    {
+      "id": "F001",
+      "fact": "",
+      "type": "definition" | "claim" | "process_step" | "date" | "task" | "constraint" | "example" | "other",
+      "importance": "high" | "medium" | "low",
+      "source_snippet": ""
+    }
+  ],
+  "topics": ["..."],
+  "dates": ["..."],
+  "missing_info": ["..."],
+  "warnings": ["..."],
+  "confidence": 0.0
+}
+
+Rules:
+- facts[].source_snippet must be copied verbatim from source_text (max 20 words).
+- Extract many small facts; avoid long paragraphs.
+
+source_text:
+${sourceText}`;
+}
+
+export function buildCustomSectionMapperPrompt(
+  packSchemaJson: string,
+  factsJson: string
+): string {
+  return `Task: Populate the pack_schema sections using facts_json only.
+Do not invent facts. If a section cannot be filled, keep it minimal and add TODO items.
+
+Return JSON matching EXACTLY this schema:
+{
+  "sections_filled": [
+    {
+      "section_id": "S1",
+      "content_internal": {
+        "bullets": ["..."],
+        "checklist_items": [
+          {
+            "text": "",
+            "frequency": "once" | "daily" | "weekly" | "monthly" | "as_needed" | "unknown",
+            "owner": "",
+            "evidence": ""
+          }
+        ],
+        "tables": [
+          {
+            "title": "",
+            "headers": ["..."],
+            "rows": [["..."]]
+          }
+        ],
+        "paragraphs": ["..."],
+        "todos": ["..."]
+      },
+      "linked_fact_ids": ["F001"]
+    }
+  ],
+  "missing_info": ["..."],
+  "warnings": ["..."],
+  "confidence": 0.0
+}
+
+Rules:
+- Produce an entry for every pack_schema.sections[].section_id in order.
+- Only include content types listed in expected_content_types; other arrays should be empty.
+- Todos must be short and actionable.
+
+Inputs:
+pack_schema:
+${packSchemaJson}
+
+facts_json:
+${factsJson}`;
+}
+
+export function buildCustomGapQuestionsPrompt(
+  mode: "single" | "bilingual",
+  primaryLanguageName: string,
+  primaryLanguageTag: string,
+  packSchemaJson: string,
+  missingInfo: string[]
+): string {
+  if (mode === "bilingual") {
+    return `Task: Create the minimum tap-based questions needed to improve the pack quality.
+Return bilingual questions: primary language + English.
+
+Return JSON matching EXACTLY this schema:
+{
+  "mode": "bilingual",
+  "primary_language_name": "",
+  "primary_language_tag": "",
+  "secondary_language_name": "English",
+  "questions": [
+    {
+      "id": "Q1",
+      "priority": "critical" | "recommended",
+      "question_primary": "",
+      "question_secondary": "",
+      "type": "yes_no" | "multiple_choice" | "number" | "short_text",
+      "options_primary": ["..."],
+      "options_secondary": ["..."],
+      "default": "",
+      "maps_to": "",
+      "why_needed_primary": "",
+      "why_needed_secondary": ""
+    }
+  ],
+  "warnings": ["..."],
+  "confidence": 0.0
+}
+
+Constraints:
+- options_primary/options_secondary must align in order and count.
+
+Inputs:
+primary_language_name: ${primaryLanguageName}
+primary_language_tag: ${primaryLanguageTag}
+pack_schema: ${packSchemaJson}
+missing_info: ${JSON.stringify(missingInfo)}`;
+  }
+
+  return `Task: Create the minimum tap-based questions needed to improve the pack quality.
+Questions must be written in the primary language.
+
+Return JSON matching EXACTLY this schema:
+{
+  "mode": "single",
+  "primary_language_name": "",
+  "primary_language_tag": "",
+  "questions": [
+    {
+      "id": "Q1",
+      "priority": "critical" | "recommended",
+      "question": "",
+      "type": "yes_no" | "multiple_choice" | "number" | "short_text",
+      "options": ["..."],
+      "default": "",
+      "maps_to": "",
+      "why_needed": ""
+    }
+  ],
+  "warnings": ["..."],
+  "confidence": 0.0
+}
+
+Constraints:
+- Max 7 questions.
+- Prefer yes_no/multiple_choice/number.
+- Only ask short_text when unavoidable.
+- Use pack_schema.ui_questions_seed as hints, but you may refine them.
+
+Inputs:
+primary_language_name: ${primaryLanguageName}
+primary_language_tag: ${primaryLanguageTag}
+pack_schema: ${packSchemaJson}
+missing_info: ${JSON.stringify(missingInfo)}`;
+}
+
+export function buildCustomDocGeneratorPrompt(
+  mode: "single" | "bilingual",
+  primaryLanguageName: string,
+  primaryLanguageTag: string,
+  packSchemaJson: string,
+  sectionsFilledJson: string,
+  userAnswersJson: string,
+  preparedDate: string
+): string {
+  if (mode === "bilingual") {
+    return `Task: Generate final documents in Markdown as defined by pack_schema.documents.
+Return bilingual documents: primary language + English.
+Do not invent facts. Use TODO lines when needed.
+
+Return JSON matching EXACTLY this schema:
+{
+  "mode": "bilingual",
+  "primary_language_name": "",
+  "primary_language_tag": "",
+  "secondary_language_name": "English",
+  "pack_name_primary": "",
+  "pack_name_secondary": "",
+  "prepared_date": "",
+  "documents": [
+    {
+      "doc_id": "D1",
+      "title_primary": "",
+      "title_secondary": "",
+      "doc_type": "notes" | "summary" | "checklist" | "plan" | "report" | "template",
+      "markdown_primary": "",
+      "markdown_secondary": ""
+    }
+  ],
+  "warnings": ["..."],
+  "confidence": 0.0
+}
+
+Inputs:
+primary_language_name: ${primaryLanguageName}
+primary_language_tag: ${primaryLanguageTag}
+pack_schema: ${packSchemaJson}
+sections_filled: ${sectionsFilledJson}
+user_answers: ${userAnswersJson}
+prepared_date: ${preparedDate}`;
+  }
+
+  return `Task: Generate final documents in Markdown as defined by pack_schema.documents.
+All user-facing text must be written only in the primary language.
+Do not invent facts. Use TODO lines when needed.
+
+Return JSON matching EXACTLY this schema:
+{
+  "mode": "single",
+  "primary_language_name": "",
+  "primary_language_tag": "",
+  "pack_name": "",
+  "prepared_date": "",
+  "documents": [
+    {
+      "doc_id": "D1",
+      "title": "",
+      "doc_type": "notes" | "summary" | "checklist" | "plan" | "report" | "template",
+      "markdown": ""
+    }
+  ],
+  "warnings": ["..."],
+  "confidence": 0.0
+}
+
+Formatting rules:
+- If the doc_type is "checklist", use "- [ ]" checkboxes.
+- If tables are needed, use Markdown tables.
+- Keep outputs concise (respect pack_schema.documents[].max_length).
+
+Inputs:
+primary_language_name: ${primaryLanguageName}
+primary_language_tag: ${primaryLanguageTag}
+pack_schema: ${packSchemaJson}
+sections_filled: ${sectionsFilledJson}
+user_answers: ${userAnswersJson}
+prepared_date (YYYY-MM-DD): ${preparedDate}`;
+}

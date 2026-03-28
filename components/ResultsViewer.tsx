@@ -42,7 +42,8 @@ export function ResultsViewer({
   const [activeSection, setActiveSection] = useState<string>(
     pack.sections[0]?.id || ""
   );
-  const colors = TYPE_COLORS[pack.niche] || TYPE_COLORS.restaurant;
+  const colors =
+    pack.niche === "custom" ? TYPE_COLORS.clinic : TYPE_COLORS[pack.niche];
   const currentSection = pack.sections.find((s) => s.id === activeSection);
   const draftCount = pack.sections.filter((s) => s.isDraft).length;
 

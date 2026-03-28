@@ -7,6 +7,7 @@ A lightweight web app that helps small regulated businesses turn messy internal 
 - 🍽️ **Restaurant / Food Business** — Food safety SOPs, cleaning checklists, allergen policies, temperature logs, staff hygiene
 - 🧒 **Daycare / Childcare Centre** — Child safety SOPs, cleaning checklists, incident reports, pickup authorization forms, emergency drills
 - 🏥 **Clinic / Dental / Physio** — Infection control SOPs, consent forms, equipment logs, waste disposal protocols
+- ✨ **Custom Pack mode** — Audience-driven schema-first outputs for student/teacher/professional/general use-cases
 
 ## Key Features
 
@@ -18,6 +19,7 @@ A lightweight web app that helps small regulated businesses turn messy internal 
 - **Rate limiting** — Built-in abuse protection
 - **Optional Cloud Save** — User-controlled; off = instant/no persistence, on = save generation data in Supabase
 - **Language support** — Choose any target language by name; optional bilingual mode (selected language + English)
+- **Dual modes** — Guided (fixed niche packs) and Custom (schema-first pack generation)
 
 ## Getting Started
 

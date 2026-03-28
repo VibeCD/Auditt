@@ -124,9 +124,14 @@ function ReviewPageContent() {
             <div>
               <h1 className="text-xl font-bold text-white">{pack.businessName}</h1>
               <p className="text-xs text-blue-300">
-                {pack.niche.charAt(0).toUpperCase() + pack.niche.slice(1)} Compliance Binder ·{" "}
+                {(pack.generationMode === "custom" ? "Custom Pack" : `${pack.niche.charAt(0).toUpperCase() + pack.niche.slice(1)} Compliance Binder`)} ·{" "}
                 {pack.version} · {pack.sections.length} documents
               </p>
+              {pack.generationMode === "custom" && (
+                <p className="text-[11px] text-blue-400 mt-0.5">
+                  Audience: {pack.customAudience || "general"} · Tone: {pack.customTone || "simple"}
+                </p>
+              )}
               <p className="text-[11px] text-blue-400 mt-0.5">
                 Language: {pack.languageMode === "bilingual"
                   ? `${pack.targetLanguageName || "English"} + English`
@@ -158,12 +163,12 @@ function ReviewPageContent() {
 
         {pack.warnings && pack.warnings.length > 0 && (
           <div className="mb-4 bg-amber-900/30 border border-amber-500/30 rounded-lg px-4 py-3 text-amber-200 text-xs">
-              <p className="font-semibold text-amber-300 mb-1">Generation warnings</p>
-              <ul className="list-disc list-inside space-y-0.5">
+            <p className="font-semibold text-amber-300 mb-1">Generation warnings</p>
+            <ul className="list-disc list-inside space-y-0.5">
               {pack.warnings.slice(0, 5).map((warning) => (
                 <li key={warning}>{warning}</li>
               ))}
-              </ul>
+            </ul>
           </div>
         )}
 

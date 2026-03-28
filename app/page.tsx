@@ -37,14 +37,40 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Niche cards */}
+      {/* Mode cards */}
       <div className="max-w-5xl mx-auto px-6 pb-20">
         <h2 className="text-center text-2xl font-bold text-white mb-3">
-          Choose your business type to get started
+          Choose your mode to get started
         </h2>
         <p className="text-center text-blue-300 text-sm mb-10">
-          Each niche has a tailored set of compliance documents built specifically for it.
+          Guided mode gives niche-optimized compliance packs. Custom mode works for students, teachers, professionals, and general users.
         </p>
+        <div className="mb-6">
+          <Link
+            href="/upload?mode=custom"
+            className="group block bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/25 rounded-2xl p-6 transition-all duration-200 hover:-translate-y-1 hover:shadow-2xl"
+          >
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-3xl mb-4 shadow-lg group-hover:scale-110 transition-transform">
+              ✨
+            </div>
+            <h3 className="text-lg font-bold text-white mb-2">Custom Pack (any user)</h3>
+            <p className="text-sm text-blue-200 mb-4 leading-relaxed">
+              Schema-first generation for student notes, teacher plans, professional reports, and more — no prompt writing needed.
+            </p>
+            <div className="space-y-1.5 mb-5">
+              {["Notes → Summary + Checklist", "Notes → Study Plan", "Notes → Report Draft"].map((doc) => (
+                <div key={doc} className="flex items-start gap-2 text-xs text-blue-300">
+                  <span className="text-teal-400 mt-0.5 flex-shrink-0">›</span>
+                  {doc}
+                </div>
+              ))}
+            </div>
+            <div className="w-full py-2.5 bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-xl text-white text-sm font-bold text-center shadow group-hover:shadow-lg transition-shadow">
+              Start Custom Pack →
+            </div>
+          </Link>
+        </div>
+        <h3 className="text-center text-lg font-semibold text-white mb-4">Or choose a guided niche</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {NICHES.map((niche) => (
             <Link

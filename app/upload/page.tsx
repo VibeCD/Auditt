@@ -7,7 +7,7 @@ import { GapQuestions } from "@/components/GapQuestions";
 import { GenerationProgress } from "@/components/GenerationProgress";
 import { getNicheById } from "@/lib/niches";
 import { generateSessionId } from "@/lib/utils";
-import { GeneratedPack, Niche, UploadedFile } from "@/types";
+import { GeneratedPack, Niche, UploadedFile, CustomAudience, CustomTone } from "@/types";
 import Link from "next/link";
 
 type Stage = "upload" | "generating-gaps" | "gaps" | "generating-docs" | "done" | "error";
@@ -34,11 +34,18 @@ const COMMON_LANGUAGES = [
   { name: "French", code: "fr" },
   { name: "German", code: "de" },
 ];
+const CUSTOM_PURPOSES = [
+  "Summary + Checklist",
+  "Study Plan",
+  "Report Draft",
+] as const;
 
 function UploadPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const nicheId = searchParams.get("niche") as Niche | null;
+  const modeParam = searchParams.get("mode");
+  const generationMode = modeParam === "custom" ? "custom" : "guided";
   const niche = nicheId ? getNicheById(nicheId) : null;
 
   const [files, setFiles] = useState<UploadedFile[]>([]);
@@ -48,18 +55,21 @@ function UploadPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [pack, setPack] = useState<GeneratedPack | null>(null);
   const [cloudSave, setCloudSave] = useState(false);
+  const [customAudience, setCustomAudience] = useState<CustomAudience>("general");
+  const [customTone, setCustomTone] = useState<CustomTone>("simple");
+  const [customPurposes, setCustomPurposes] = useState<string[]>([CUSTOM_PURPOSES[0]]);
   const [languageMode, setLanguageMode] = useState<"single" | "bilingual">("single");
   const [targetLanguageName, setTargetLanguageName] = useState("English");
   const [targetLanguageCode, setTargetLanguageCode] = useState("en");
   const [sessionId] = useState(() => generateSessionId());
 
   useEffect(() => {
-    if (!niche) {
+    if (generationMode === "guided" && !niche) {
       router.replace("/");
     }
-  }, [niche, router]);
+  }, [generationMode, niche, router]);
 
-  if (!niche) return null;
+  if (generationMode === "guided" && !niche) return null;
 
   async function startGeneration() {
     setError(null);
@@ -76,7 +86,11 @@ function UploadPageContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          niche: niche!.id,
+          niche: generationMode === "guided" ? niche!.id : undefined,
+          generationMode,
+          customAudience,
+          customPurposes,
+          customTone,
           files,
           pastedText,
           sessionId,
@@ -121,7 +135,11 @@ function UploadPageContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          niche: niche!.id,
+          niche: generationMode === "guided" ? niche!.id : undefined,
+          generationMode,
+          customAudience,
+          customPurposes,
+          customTone,
           files,
           pastedText,
           sessionId,
@@ -173,10 +191,21 @@ function UploadPageContent() {
             ← Back
           </Link>
           <span className="text-blue-600">|</span>
-          <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${niche.color} flex items-center justify-center text-lg`}>
-            {niche.icon}
-          </div>
-          <h1 className="text-lg font-bold text-white">{niche.label} Binder</h1>
+          {generationMode === "guided" ? (
+            <>
+              <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${niche!.color} flex items-center justify-center text-lg`}>
+                {niche!.icon}
+              </div>
+              <h1 className="text-lg font-bold text-white">{niche!.label} Binder</h1>
+            </>
+          ) : (
+            <>
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-lg">
+                ✨
+              </div>
+              <h1 className="text-lg font-bold text-white">Custom Pack Studio</h1>
+            </>
+          )}
         </div>
 
         {/* Stage indicator */}
@@ -238,18 +267,90 @@ function UploadPageContent() {
             </div>
 
             {/* Document list preview */}
-            <div className="bg-white/5 rounded-xl p-4">
-              <p className="text-xs font-semibold text-blue-300 mb-2">
-                Documents that will be generated:
-              </p>
-              <div className="space-y-1">
-                {niche.documents.map((doc) => (
-                  <div key={doc} className="flex items-center gap-2 text-xs text-blue-200">
-                    <span className="text-teal-400">›</span> {doc}
-                  </div>
-                ))}
+            {generationMode === "guided" ? (
+              <div className="bg-white/5 rounded-xl p-4">
+                <p className="text-xs font-semibold text-blue-300 mb-2">
+                  Documents that will be generated:
+                </p>
+                <div className="space-y-1">
+                  {niche!.documents.map((doc) => (
+                    <div key={doc} className="flex items-center gap-2 text-xs text-blue-200">
+                      <span className="text-teal-400">›</span> {doc}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="bg-white/5 rounded-xl p-4 border border-white/10 space-y-3">
+                <p className="text-xs font-semibold text-blue-300">Custom pack options</p>
+                <div>
+                  <p className="text-[11px] text-blue-300 mb-2">Audience</p>
+                  <div className="flex flex-wrap gap-2">
+                    {(["student", "teacher", "professional", "general"] as CustomAudience[]).map((aud) => (
+                      <button
+                        key={aud}
+                        type="button"
+                        onClick={() => setCustomAudience(aud)}
+                        className={`px-2.5 py-1 rounded-full text-xs border ${
+                          customAudience === aud
+                            ? "bg-violet-600 border-violet-500 text-white"
+                            : "bg-white/5 border-white/20 text-blue-200"
+                        }`}
+                      >
+                        {aud}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] text-blue-300 mb-2">Purpose</p>
+                  <div className="flex flex-wrap gap-2">
+                    {CUSTOM_PURPOSES.map((purpose) => {
+                      const active = customPurposes.includes(purpose);
+                      return (
+                        <button
+                          key={purpose}
+                          type="button"
+                          onClick={() =>
+                            setCustomPurposes((prev) =>
+                              active
+                                ? prev.filter((p) => p !== purpose)
+                                : [...prev, purpose]
+                            )
+                          }
+                          className={`px-2.5 py-1 rounded-full text-xs border ${
+                            active
+                              ? "bg-violet-600 border-violet-500 text-white"
+                              : "bg-white/5 border-white/20 text-blue-200"
+                          }`}
+                        >
+                          {purpose}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] text-blue-300 mb-2">Tone</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(["simple", "formal"] as CustomTone[]).map((tone) => (
+                      <button
+                        key={tone}
+                        type="button"
+                        onClick={() => setCustomTone(tone)}
+                        className={`py-2 rounded-lg text-xs font-medium border ${
+                          customTone === tone
+                            ? "bg-violet-600 border-violet-500 text-white"
+                            : "bg-white/5 border-white/20 text-blue-200"
+                        }`}
+                      >
+                        {tone}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="bg-white/5 rounded-xl p-4 border border-white/10">
               <label className="flex items-start gap-3 cursor-pointer">
@@ -350,7 +451,7 @@ function UploadPageContent() {
               disabled={!hasContent}
               className={`w-full py-4 rounded-xl font-bold text-lg transition-all shadow-lg ${
                 hasContent
-                  ? `bg-gradient-to-r ${niche.color} hover:opacity-90 hover:shadow-xl hover:scale-[1.01] text-white`
+                  ? `bg-gradient-to-r ${generationMode === "guided" ? niche!.color : "from-violet-500 to-fuchsia-500"} hover:opacity-90 hover:shadow-xl hover:scale-[1.01] text-white`
                   : "bg-white/10 text-white/30 cursor-not-allowed"
               }`}
             >

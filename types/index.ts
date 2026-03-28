@@ -1,4 +1,7 @@
 export type Niche = "restaurant" | "daycare" | "clinic";
+export type GenerationMode = "guided" | "custom";
+export type CustomAudience = "student" | "teacher" | "professional" | "general";
+export type CustomTone = "simple" | "formal";
 
 export interface NicheInfo {
   id: Niche;
@@ -19,7 +22,11 @@ export interface UploadedFile {
 }
 
 export interface GeneratePackRequest {
-  niche: Niche;
+  niche?: Niche;
+  generationMode?: GenerationMode;
+  customAudience?: CustomAudience;
+  customPurposes?: string[];
+  customTone?: CustomTone;
   files: UploadedFile[];
   pastedText?: string;
   sessionId: string;
@@ -49,7 +56,7 @@ export interface DocumentSection {
 
 export interface GeneratedPack {
   sessionId: string;
-  niche: Niche;
+  niche: Niche | "custom";
   businessName: string;
   generatedAt: string;
   version: string;
@@ -61,6 +68,10 @@ export interface GeneratedPack {
   languageMode?: "single" | "bilingual";
   targetLanguageName?: string;
   targetLanguageCode?: string;
+  generationMode?: GenerationMode;
+  customAudience?: CustomAudience;
+  customPurposes?: string[];
+  customTone?: CustomTone;
 }
 
 export interface GenerateResponse {

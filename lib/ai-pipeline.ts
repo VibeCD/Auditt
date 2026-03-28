@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import {
+  CustomAudience,
+  CustomTone,
   DocumentSection,
   GapQuestion,
   GeneratedPack,
@@ -14,6 +16,11 @@ import {
   buildStage2Prompt,
   buildStage3Prompt,
   buildStage4Prompt,
+  buildCustomDocGeneratorPrompt,
+  buildCustomFactsExtractorPrompt,
+  buildCustomGapQuestionsPrompt,
+  buildCustomSchemaGeneratorPrompt,
+  buildCustomSectionMapperPrompt,
 } from "@/lib/ai-prompts";
 import { MAX_GAP_QUESTIONS, MAX_INPUT_CHARS, NIM_MODEL } from "@/lib/constants";
 
@@ -186,6 +193,116 @@ type Stage4Documents = {
   confidence?: number;
 };
 
+type CustomSchema = {
+  pack_type: "custom";
+  pack_name?: string;
+  mode?: "single" | "bilingual";
+  primary_language_name?: string;
+  primary_language_tag?: string;
+  secondary_language_name?: string;
+  audience?: CustomAudience;
+  purpose?: string;
+  tone?: CustomTone;
+  sections?: Array<{
+    section_id: string;
+    title_internal: string;
+    intent_internal: string;
+    expected_content_types: Array<"bullets" | "checklist" | "table" | "paragraphs">;
+  }>;
+  documents?: Array<{
+    doc_id: string;
+    title_internal: string;
+    doc_type: "notes" | "summary" | "checklist" | "plan" | "report" | "template";
+    format: "markdown";
+    max_length: "short" | "medium";
+    required_section_ids: string[];
+  }>;
+  ui_questions_seed?: Array<{
+    id: string;
+    priority: "critical" | "recommended";
+    question_intent: string;
+    type: "yes_no" | "multiple_choice" | "number" | "short_text";
+    options_internal?: string[];
+    default?: string;
+    maps_to: string;
+    why_needed_internal: string;
+  }>;
+  warnings?: string[];
+  confidence?: number;
+};
+
+type CustomFacts = {
+  facts?: Array<{
+    id: string;
+    fact: string;
+    type:
+      | "definition"
+      | "claim"
+      | "process_step"
+      | "date"
+      | "task"
+      | "constraint"
+      | "example"
+      | "other";
+    importance: "high" | "medium" | "low";
+    source_snippet: string;
+  }>;
+  topics?: string[];
+  dates?: string[];
+  missing_info?: string[];
+  warnings?: string[];
+  confidence?: number;
+};
+
+type CustomSectionsMapped = {
+  sections_filled?: Array<{
+    section_id: string;
+    content_internal: {
+      bullets?: string[];
+      checklist_items?: Array<{
+        text: string;
+        frequency: "once" | "daily" | "weekly" | "monthly" | "as_needed" | "unknown";
+        owner: string;
+        evidence: string;
+      }>;
+      tables?: Array<{
+        title: string;
+        headers: string[];
+        rows: string[][];
+      }>;
+      paragraphs?: string[];
+      todos?: string[];
+    };
+    linked_fact_ids: string[];
+  }>;
+  missing_info?: string[];
+  warnings?: string[];
+  confidence?: number;
+};
+
+type CustomDocs = {
+  mode?: "single" | "bilingual";
+  primary_language_name?: string;
+  primary_language_tag?: string;
+  secondary_language_name?: string;
+  pack_name?: string;
+  pack_name_primary?: string;
+  pack_name_secondary?: string;
+  prepared_date?: string;
+  documents?: Array<{
+    doc_id: string;
+    title?: string;
+    title_primary?: string;
+    title_secondary?: string;
+    doc_type: "notes" | "summary" | "checklist" | "plan" | "report" | "template";
+    markdown?: string;
+    markdown_primary?: string;
+    markdown_secondary?: string;
+  }>;
+  warnings?: string[];
+  confidence?: number;
+};
+
 function markdownToHtml(markdown: string): string {
   const lines = markdown.split(/\r?\n/);
   const out: string[] = [];
@@ -301,6 +418,14 @@ function sectionTypeFromDocType(
   return "policy";
 }
 
+function sectionTypeFromCustomDocType(
+  docType: "notes" | "summary" | "checklist" | "plan" | "report" | "template"
+): DocumentSection["type"] {
+  if (docType === "checklist") return "checklist";
+  if (docType === "template") return "form";
+  return "policy";
+}
+
 function mapQuestionsToGapQuestions(
   input: Stage3Questions,
   mode: "single" | "bilingual"
@@ -372,28 +497,181 @@ export interface BuildPackResult {
   pack: GeneratedPack;
   telemetry: {
     sourceText: string;
-    stage1: Stage1Facts;
-    stage2: Stage2Sections;
+    stage1?: Stage1Facts;
+    stage2?: Stage2Sections;
     stage3?: Stage3Questions;
     stage4?: Stage4Documents;
+    customSchema?: CustomSchema;
+    customFacts?: CustomFacts;
+    customMapped?: CustomSectionsMapped;
+    customQuestions?: Stage3Questions;
+    customDocs?: CustomDocs;
   };
 }
 
 export async function buildPack(
-  niche: Niche,
+  niche: Niche | "custom",
   files: UploadedFile[],
   pastedText: string,
   sessionId: string,
   gapAnswers?: Record<string, string>,
   languageMode: "single" | "bilingual" = "single",
   targetLanguageName = "English",
-  targetLanguageCode = "en"
+  targetLanguageCode = "en",
+  generationMode: "guided" | "custom" = "guided",
+  customAudience: CustomAudience = "general",
+  customPurposes: string[] = [],
+  customTone: CustomTone = "simple"
 ): Promise<BuildPackResult> {
   const sourceText = buildSourceText(files, pastedText);
 
+  if (generationMode === "custom") {
+    const schema = await callNimJson<CustomSchema>(
+      buildCustomSchemaGeneratorPrompt(
+        languageMode,
+        targetLanguageName,
+        targetLanguageCode,
+        customAudience,
+        customPurposes,
+        customTone,
+        files.map((f) => f.type),
+        sourceText
+      )
+    );
+    const facts = await callNimJson<CustomFacts>(buildCustomFactsExtractorPrompt(sourceText));
+    const mapped = await callNimJson<CustomSectionsMapped>(
+      buildCustomSectionMapperPrompt(JSON.stringify(schema), JSON.stringify(facts))
+    );
+
+    const customWarnings = [
+      ...(schema.warnings || []),
+      ...(facts.warnings || []),
+      ...(mapped.warnings || []),
+    ];
+
+    if (gapAnswers === undefined) {
+      const customQuestions = await callNimJson<Stage3Questions>(
+        buildCustomGapQuestionsPrompt(
+          languageMode,
+          targetLanguageName,
+          targetLanguageCode,
+          JSON.stringify(schema),
+          [...(facts.missing_info || []), ...(mapped.missing_info || [])]
+        )
+      );
+
+      const pack: GeneratedPack = {
+        sessionId,
+        niche: "custom",
+        businessName: schema.pack_name || "Custom Pack",
+        generatedAt: new Date().toISOString(),
+        version: generateVersion(),
+        sections: [],
+        gapQuestions: mapQuestionsToGapQuestions(customQuestions, languageMode),
+        gapAnswers: {},
+        status: "draft",
+        warnings: [...customWarnings, ...(customQuestions.warnings || [])],
+        languageMode,
+        targetLanguageName,
+        targetLanguageCode,
+        generationMode: "custom",
+        customAudience,
+        customPurposes,
+        customTone,
+      };
+
+      return {
+        pack,
+        telemetry: {
+          sourceText,
+          customSchema: schema,
+          customFacts: facts,
+          customMapped: mapped,
+          customQuestions,
+        },
+      };
+    }
+
+    const customDocs = await callNimJson<CustomDocs>(
+      buildCustomDocGeneratorPrompt(
+        languageMode,
+        targetLanguageName,
+        targetLanguageCode,
+        JSON.stringify(schema),
+        JSON.stringify(mapped),
+        JSON.stringify(gapAnswers || {}),
+        toShortDate(new Date())
+      )
+    );
+
+    const sections: DocumentSection[] = (customDocs.documents || []).map((doc, index) => {
+      const markdown =
+        languageMode === "bilingual"
+          ? formatBilingualMarkdown(
+              doc.title_primary || doc.title || `Document ${index + 1}`,
+              doc.title_secondary || "English",
+              doc.markdown_primary || "",
+              doc.markdown_secondary || ""
+            )
+          : (doc.markdown || "");
+      const content = markdownToHtml(markdown);
+      const missingItems = markdown
+        .split(/\r?\n/)
+        .filter((line) => line.includes("TODO"))
+        .map((line) => line.trim());
+
+      return {
+        id: doc.doc_id || `doc-${index + 1}`,
+        title:
+          languageMode === "bilingual"
+            ? `${doc.title_primary || doc.title || `Document ${index + 1}`} / ${doc.title_secondary || "English"}`
+            : (doc.title || `Document ${index + 1}`),
+        type: sectionTypeFromCustomDocType(doc.doc_type),
+        content,
+        isDraft: missingItems.length > 0,
+        missingItems,
+      };
+    });
+
+    const pack: GeneratedPack = {
+      sessionId,
+      niche: "custom",
+      businessName:
+        customDocs.pack_name ||
+        customDocs.pack_name_primary ||
+        schema.pack_name ||
+        "Custom Pack",
+      generatedAt: new Date().toISOString(),
+      version: generateVersion(),
+      sections,
+      gapQuestions: [],
+      gapAnswers: gapAnswers || {},
+      status: sections.some((s) => s.isDraft) ? "draft" : "ready",
+      warnings: [...customWarnings, ...(customDocs.warnings || [])],
+      languageMode,
+      targetLanguageName,
+      targetLanguageCode,
+      generationMode: "custom",
+      customAudience,
+      customPurposes,
+      customTone,
+    };
+
+    return {
+      pack,
+      telemetry: {
+        sourceText,
+        customSchema: schema,
+        customFacts: facts,
+        customMapped: mapped,
+        customDocs,
+      },
+    };
+  }
+
   const stage1 = await callNimJson<Stage1Facts>(buildStage1Prompt(sourceText));
   const stage2 = await callNimJson<Stage2Sections>(
-    buildStage2Prompt(niche, JSON.stringify(stage1))
+    buildStage2Prompt(niche as Niche, JSON.stringify(stage1))
   );
 
   const combinedWarnings: string[] = [
@@ -432,6 +710,7 @@ export async function buildPack(
       languageMode,
       targetLanguageName,
       targetLanguageCode,
+      generationMode: "guided",
     };
 
     return {
@@ -495,6 +774,7 @@ export async function buildPack(
     languageMode,
     targetLanguageName,
     targetLanguageCode,
+    generationMode: "guided",
   };
 
   return {
